@@ -1,4 +1,6 @@
-import { geolocation, ipAddress } from "@vercel/functions";
+import { buildSystemPrompt } from "@/lib/system-prompt";
+import { createTools } from "@/lib/tools";
+import { ipAddress } from "@vercel/functions";
 import {
   convertToModelMessages,
   createUIMessageStream,
@@ -20,7 +22,6 @@ import {
   getCapabilities,
   getModelAvailability,
 } from "@/lib/ai/models";
-import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
 import { getLanguageModel } from "@/lib/ai/providers";
 import { createDocument } from "@/lib/ai/tools/create-document";
 import { editDocument } from "@/lib/ai/tools/edit-document";
@@ -170,15 +171,6 @@ export async function POST(request: Request) {
       ];
     }
 
-    const { longitude, latitude, city, country } = geolocation(request);
-
-    const requestHints: RequestHints = {
-      city,
-      country,
-      latitude,
-      longitude,
-    };
-
     if (message?.role === "user") {
       await saveMessages({
         messages: [
@@ -266,18 +258,27 @@ export async function POST(request: Request) {
           clearHealthCheckTimer();
         };
 
+        const bearerToken =
+          request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ??
+          "";
+
         const result = streamText({
           activeTools:
             isReasoningModel && !supportsTools
               ? []
               : [
+                  "searchDocuments",
+                  "getSkillDetails",
+                  "getItems",
+                  "getItemById",
+                  "submitAction",
                   "getWeather",
                   "createDocument",
                   "editDocument",
                   "updateDocument",
                   "requestSuggestions",
                 ],
-          instructions: systemPrompt({ requestHints, supportsTools }),
+          instructions: buildSystemPrompt(),
           messages: modelMessages,
           model: getLanguageModel(chatModel),
           onAbort() {
@@ -308,6 +309,7 @@ export async function POST(request: Request) {
             isEnabled: isProductionEnvironment,
           },
           tools: {
+            ...createTools(bearerToken),
             createDocument: createDocument({
               dataStream,
               modelId: chatModel,

@@ -1,12 +1,6 @@
-export const DEFAULT_CHAT_MODEL = "moonshotai/kimi-k2.5";
+export const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
-export const titleModel = {
-  description: "Fast model for title generation",
-  gatewayOrder: ["fireworks", "bedrock"],
-  id: "moonshotai/kimi-k2.5",
-  name: "Kimi K2.5",
-  provider: "moonshotai",
-};
+export const DEFAULT_CHAT_MODEL = "claude-sonnet-4-6";
 
 export type ModelCapabilities = {
   tools: boolean;
@@ -23,7 +17,26 @@ export type ChatModel = {
   reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high";
 };
 
+export const titleModel: ChatModel = {
+  description: "Fast Anthropic model for title generation",
+  id: DEFAULT_MODEL,
+  name: "Claude Haiku 4.5",
+  provider: "anthropic",
+};
+
 export const chatModels: ChatModel[] = [
+  {
+    description: "Anthropic's most capable model with tool use and vision",
+    id: "claude-sonnet-4-6",
+    name: "Claude Sonnet 4.6",
+    provider: "anthropic",
+  },
+  {
+    description: "Anthropic's fastest and most compact model",
+    id: "claude-haiku-4-5-20251001",
+    name: "Claude Haiku 4.5",
+    provider: "anthropic",
+  },
   {
     description: "Fast and capable model with tool use",
     gatewayOrder: ["bedrock", "deepinfra"],
@@ -68,6 +81,10 @@ export async function getCapabilities(): Promise<
 > {
   const results = await Promise.all(
     chatModels.map(async (model) => {
+      if (model.provider === "anthropic") {
+        return [model.id, { reasoning: false, tools: true, vision: true }];
+      }
+
       try {
         const res = await fetch(
           `https://ai-gateway.vercel.sh/v1/models/${model.id}/endpoints`,
