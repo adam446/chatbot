@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getAutomaticSearchMode } from "@/lib/search-mode";
 import { getWebSearchDebugInfo, searchWeb } from "@/lib/web-search";
 
 export async function GET(request: Request) {
@@ -9,9 +10,11 @@ export async function GET(request: Request) {
     commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
     environment: process.env.VERCEL_ENV ?? "local",
   };
+  const automaticSearchMode = query ? getAutomaticSearchMode(query) : "off";
 
   if (!query) {
     return NextResponse.json({
+      automaticSearchMode,
       debug,
       deployment,
       message: "Add ?q=your%20query to run a live search test.",
@@ -21,6 +24,7 @@ export async function GET(request: Request) {
   const search = await searchWeb(query);
 
   return NextResponse.json({
+    automaticSearchMode,
     debug,
     deployment,
     query,

@@ -41,6 +41,7 @@ import {
 import type { DBMessage } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
 import { checkIpRateLimit } from "@/lib/ratelimit";
+import { getAutomaticSearchMode } from "@/lib/search-mode";
 import { buildSystemPrompt } from "@/lib/system-prompt";
 import { createTools } from "@/lib/tools";
 import type { ChatMessage, WaitingStatusData } from "@/lib/types";
@@ -77,31 +78,6 @@ export { getStreamContext };
 function getSearchQuery(message?: ChatMessage) {
   const text = message ? getTextFromMessage(message).trim() : "";
   return text.slice(0, 500);
-}
-
-function getAutomaticSearchMode(query: string): "off" | "search" | "deep" {
-  const normalized = query
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-
-  if (
-    /\b(deep search|recherche approfondie|recherche profonde)\b/.test(
-      normalized
-    )
-  ) {
-    return "deep";
-  }
-
-  if (
-    /\b(search|recherche|chercher|cherche|verifie|verifier|verify|look up|lookup|en ligne|online|current|actuel|recente?|latest|source)\b/.test(
-      normalized
-    )
-  ) {
-    return "search";
-  }
-
-  return "off";
 }
 
 function formatServerSearchContext(
