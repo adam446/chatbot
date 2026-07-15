@@ -130,6 +130,12 @@ export async function POST(request: Request) {
       selectedVisibilityType,
     } = requestBody;
 
+    console.info("[chat] request", {
+      commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
+      hasMessage: Boolean(message),
+      searchMode,
+    });
+
     const [botIdResult, session] = await Promise.all([
       BOTID_ENABLED ? checkBotId().catch(() => null) : Promise.resolve(null),
       auth(),

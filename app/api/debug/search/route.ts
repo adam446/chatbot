@@ -5,10 +5,15 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("q")?.trim();
   const debug = getWebSearchDebugInfo();
+  const deployment = {
+    commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
+    environment: process.env.VERCEL_ENV ?? "local",
+  };
 
   if (!query) {
     return NextResponse.json({
       debug,
+      deployment,
       message: "Add ?q=your%20query to run a live search test.",
     });
   }
@@ -17,6 +22,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     debug,
+    deployment,
     query,
     search: {
       configured: search.configured,
