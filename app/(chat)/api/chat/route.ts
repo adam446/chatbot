@@ -131,12 +131,6 @@ export async function POST(request: Request) {
       selectedVisibilityType,
     } = requestBody;
 
-    console.info("[chat] request", {
-      commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
-      hasMessage: Boolean(message),
-      searchMode,
-    });
-
     const [botIdResult, session] = await Promise.all([
       BOTID_ENABLED ? checkBotId().catch(() => null) : Promise.resolve(null),
       auth(),
@@ -248,6 +242,19 @@ export async function POST(request: Request) {
     const supportsTools = capabilities?.tools === true;
 
     const modelMessages = await convertToModelMessages(uiMessages);
+    const searchQuery = getSearchQuery(message as ChatMessage | undefined);
+    const automaticSearchMode = getAutomaticSearchMode(searchQuery);
+    const effectiveSearchMode =
+      searchMode === "off" ? automaticSearchMode : searchMode;
+
+    console.log("[chat] request", {
+      automaticSearchMode,
+      commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
+      effectiveSearchMode,
+      hasMessage: Boolean(message),
+      hasSearchQuery: Boolean(searchQuery),
+      searchMode,
+    });
 
     const stream = createUIMessageStream({
       execute: async ({ writer: dataStream }) => {
@@ -317,16 +324,12 @@ export async function POST(request: Request) {
           request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ??
           "";
 
-        const searchQuery = getSearchQuery(message as ChatMessage | undefined);
-        const automaticSearchMode = getAutomaticSearchMode(searchQuery);
-        const effectiveSearchMode =
-          searchMode === "off" ? automaticSearchMode : searchMode;
         let serverSearchContext = "";
 
         if (searchQuery && effectiveSearchMode === "search") {
           writeWaitingStatus("waiting", "Searching...");
           const search = await searchWeb(searchQuery);
-          console.info("[search] server-side search", {
+          console.log("[search] server-side search", {
             automaticSearchMode,
             configured: search.configured,
             provider: search.provider,
@@ -337,7 +340,7 @@ export async function POST(request: Request) {
         } else if (searchQuery && effectiveSearchMode === "deep") {
           writeWaitingStatus("waiting", "Deep searching...");
           const search = await deepSearch(searchQuery);
-          console.info("[search] server-side deep search", {
+          console.log("[search] server-side deep search", {
             automaticSearchMode,
             configured: search.configured,
             provider: search.provider,
@@ -516,6 +519,12 @@ export async function POST(request: Request) {
         } catch {
           /* non-critical */
         }
+      },
+      headers: {
+        "x-chat-automatic-search-mode": automaticSearchMode,
+        "x-chat-effective-search-mode": effectiveSearchMode,
+        "x-chat-requested-search-mode": searchMode,
+        "x-chat-search-query-present": String(Boolean(searchQuery)),
       },
       stream,
     });
