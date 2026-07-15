@@ -99,10 +99,13 @@ function buildPayload({
 }: NvidiaImageRequest) {
   const payload: Record<string, unknown> = {
     height: getNumberEnv("NVIDIA_IMAGE_HEIGHT", DEFAULT_HEIGHT),
-    model: getImageModel(),
     prompt,
     width: getNumberEnv("NVIDIA_IMAGE_WIDTH", DEFAULT_WIDTH),
   };
+
+  if (process.env.NVIDIA_IMAGE_INCLUDE_MODEL === "1") {
+    payload.model = getImageModel();
+  }
 
   if (sourceImageBase64) {
     payload.mode = "image-to-image";
