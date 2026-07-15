@@ -71,7 +71,7 @@ export function createTools(_token: string) {
 
     searchWeb: tool({
       description:
-        "Search the public web for current or real-world reference information. Use this before image generation when the user references a real game, film, show, franchise, person, product, place, or visual subject.",
+        "Search the public web for current facts, recent information, source verification, or real-world reference information. Use this when the user asks to search online, verify something current, or generate an image inspired by a real subject.",
       execute: async ({ query }) => searchWeb(query),
       inputSchema: z.object({
         query: z

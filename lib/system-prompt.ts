@@ -50,6 +50,8 @@ Artifact rules:
 
 You have access to the following skills. Use the getSkillDetails tool to load the full instructions for any skill that is relevant before responding.
 
+When the user asks to search, verify, look up, or answer current information, load the Web Search skill and call searchWeb before answering. If web search is not configured, say so clearly.
+
 ## Available Skills
 ${skillManifest}`;
 }
