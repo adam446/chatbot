@@ -15,6 +15,6 @@ Before answering:
 2. For deep search, call `searchWeb` multiple times with different focused queries.
 3. Use the search results as the basis for the answer.
 4. Include source links when useful.
-5. If `searchWeb` says search is not configured, say that web search needs `TAVILY_API_KEY` or `BRAVE_SEARCH_API_KEY` and do not pretend you searched.
-6. If search results conflict, explain the uncertainty and prefer official or primary sources.
-
+5. Prefer NVIDIA-backed search when configured through `NVIDIA_SEARCH_API_URL`.
+6. If `searchWeb` says search is not configured, say that web search needs `NVIDIA_SEARCH_API_URL` for NVIDIA-backed search, or `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY` for fallback external search. Do not pretend you searched.
+7. If search results conflict, explain the uncertainty and prefer official or primary sources.

@@ -31,6 +31,21 @@ const braveResponseSchema = z.object({
     .optional(),
 });
 
+const flexibleSearchResultSchema = z.object({
+  content: z.string().optional(),
+  description: z.string().optional(),
+  snippet: z.string().optional(),
+  text: z.string().optional(),
+  title: z.string().optional(),
+  url: z.string().optional(),
+});
+
+const flexibleSearchResponseSchema = z.object({
+  answer: z.string().optional(),
+  results: z.array(flexibleSearchResultSchema).optional(),
+  sources: z.array(flexibleSearchResultSchema).optional(),
+});
+
 function cleanResults(results: WebSearchResult[]) {
   return results
     .filter((result) => result.title && result.url)
@@ -110,8 +125,78 @@ async function searchBrave(query: string): Promise<WebSearchResult[]> {
   );
 }
 
+async function searchNvidia(query: string): Promise<WebSearchResult[]> {
+  const endpoint = process.env.NVIDIA_SEARCH_API_URL;
+  if (!endpoint) {
+    return [];
+  }
+
+  const apiKey =
+    process.env.NVIDIA_SEARCH_API_KEY ?? process.env.NVIDIA_API_KEY;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  const response = await fetch(endpoint, {
+    body: JSON.stringify({
+      max_results: 5,
+      query,
+    }),
+    headers,
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`NVIDIA search failed (${response.status})`);
+  }
+
+  const json = flexibleSearchResponseSchema.parse(await response.json());
+  const results = cleanResults(
+    [...(json.results ?? []), ...(json.sources ?? [])].map((result) => ({
+      snippet:
+        result.snippet ??
+        result.content ??
+        result.description ??
+        result.text ??
+        "",
+      source: "nvidia",
+      title: result.title ?? result.url ?? "NVIDIA search result",
+      url: result.url ?? "",
+    }))
+  );
+
+  if (results.length > 0) {
+    return results;
+  }
+
+  if (json.answer) {
+    return [
+      {
+        snippet: json.answer.slice(0, 700),
+        source: "nvidia",
+        title: "NVIDIA search answer",
+        url: endpoint,
+      },
+    ];
+  }
+
+  return [];
+}
+
 export async function searchWeb(query: string) {
   const errors: string[] = [];
+
+  if (process.env.NVIDIA_SEARCH_API_URL) {
+    try {
+      const results = await searchNvidia(query);
+      return { configured: true, provider: "nvidia", results };
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "NVIDIA failed");
+    }
+  }
 
   if (process.env.TAVILY_API_KEY) {
     try {
@@ -143,7 +228,7 @@ export async function searchWeb(query: string) {
   return {
     configured: false,
     message:
-      "Web search is not configured. Set TAVILY_API_KEY or BRAVE_SEARCH_API_KEY.",
+      "Web search is not configured. Set NVIDIA_SEARCH_API_URL for NVIDIA-backed search, or TAVILY_API_KEY / BRAVE_SEARCH_API_KEY for external search.",
     provider: null,
     results: [],
   };

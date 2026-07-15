@@ -14,6 +14,7 @@ Use this skill when the user asks for NVIDIA-specific behavior, model selection,
 - NVIDIA image generation uses `createDocument` with `kind: "image"`.
 - NVIDIA image editing uses `createDocument` with `kind: "image"` and `sourceImageUrl`, or `updateDocument` for an existing image artifact.
 - Image requests always pass through the NVIDIA safety model first.
+- NVIDIA-backed web/deep search uses `NVIDIA_SEARCH_API_URL` when configured.
 
 ## Required Configuration
 
@@ -24,6 +25,8 @@ Use this skill when the user asks for NVIDIA-specific behavior, model selection,
 - `NVIDIA_IMAGE_EDIT_API_URL` can override the image-edit endpoint.
 - `NVIDIA_IMAGE_INCLUDE_MODEL=1` includes the model field in the image payload. Keep it unset or `0` if the endpoint rejects extra `model` fields.
 - `NVIDIA_IMAGE_WIDTH` and `NVIDIA_IMAGE_HEIGHT` control generated image size.
+- `NVIDIA_SEARCH_API_URL` enables NVIDIA-backed web/retrieval search before Tavily or Brave fallbacks.
+- `NVIDIA_SEARCH_API_KEY` can provide a separate bearer token for that search endpoint. If omitted, the app uses `NVIDIA_API_KEY`.
 
 ## Image Safety Policy
 
@@ -40,4 +43,3 @@ Before any image generation or image editing:
 - For NVIDIA API errors, identify whether the issue is missing `NVIDIA_API_KEY`, endpoint mismatch, rejected payload fields, unsupported image editing endpoint, or safety failure.
 - If the user asks for a current NVIDIA model recommendation or latest NVIDIA API behavior, use the Web Search skill first.
 - If the user asks for a real game/movie/person/product visual reference before image generation, use Visual Reference Research first, then this skill.
-
