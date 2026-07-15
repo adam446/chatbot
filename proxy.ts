@@ -31,7 +31,11 @@ export async function proxy(request: NextRequest) {
 
   const isGuest = guestRegex.test(token?.email ?? "");
 
-  if (token && !isGuest && ["/login", "/register"].includes(pathname)) {
+  if (
+    token &&
+    !isGuest &&
+    ["/login", "/register", "/signup"].includes(pathname)
+  ) {
     return NextResponse.redirect(new URL(`${base}/`, request.url));
   }
 
@@ -45,6 +49,7 @@ export const config = {
     "/api/:path*",
     "/login",
     "/register",
+    "/signup",
 
     "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],

@@ -4,19 +4,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useActionState, useEffect, useState } from "react";
-
 import { AuthForm } from "@/components/chat/auth-form";
 import { SubmitButton } from "@/components/chat/submit-button";
 import { toast } from "@/components/chat/toast";
-import { type LoginActionState, login } from "../actions";
+import { type RegisterActionState, register } from "../actions";
 
 export default function Page() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [isSuccessful, setIsSuccessful] = useState(false);
 
-  const [state, formAction] = useActionState<LoginActionState, FormData>(
-    login,
+  const [state, formAction] = useActionState<RegisterActionState, FormData>(
+    register,
     { status: "idle" }
   );
 
@@ -24,14 +23,17 @@ export default function Page() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: router and updateSession are stable refs
   useEffect(() => {
-    if (state.status === "failed") {
-      toast({ description: "Invalid credentials!", type: "error" });
+    if (state.status === "user_exists") {
+      toast({ description: "Account already exists!", type: "error" });
+    } else if (state.status === "failed") {
+      toast({ description: "Failed to create account!", type: "error" });
     } else if (state.status === "invalid_data") {
       toast({
         description: "Failed validating your submission!",
         type: "error",
       });
     } else if (state.status === "success") {
+      toast({ description: "Account created!", type: "success" });
       setIsSuccessful(true);
       updateSession();
       router.refresh();
@@ -45,19 +47,17 @@ export default function Page() {
 
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
-      <p className="text-sm text-muted-foreground">
-        Sign in to your account to continue
-      </p>
-      <AuthForm action={handleSubmit} defaultEmail={email} mode="login">
-        <SubmitButton isSuccessful={isSuccessful}>Sign in</SubmitButton>
+      <h1 className="text-2xl font-semibold tracking-tight">Create account</h1>
+      <p className="text-sm text-muted-foreground">Get started for free</p>
+      <AuthForm action={handleSubmit} defaultEmail={email} mode="signup">
+        <SubmitButton isSuccessful={isSuccessful}>Sign up</SubmitButton>
         <p className="text-center text-[13px] text-muted-foreground">
-          {"No account? "}
+          {"Have an account? "}
           <Link
             className="text-foreground underline-offset-4 hover:underline"
-            href="/signup"
+            href="/login"
           >
-            Sign up
+            Sign in
           </Link>
         </p>
       </AuthForm>
