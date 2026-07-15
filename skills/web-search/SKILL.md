@@ -12,7 +12,7 @@ Examples include current leaders, prices, product availability, news, schedules,
 Before answering:
 
 1. Call `searchWeb` with a focused query.
-2. For deep search, call `searchWeb` multiple times with different focused queries.
+2. For deep search, call `deepSearch` with the user's research question. It uses a NVIDIA model to plan multiple focused queries, then searches configured sources.
 3. Use the search results as the basis for the answer.
 4. Include source links when useful.
 5. Prefer NVIDIA-backed search when configured through `NVIDIA_SEARCH_API_URL`.

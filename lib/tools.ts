@@ -2,12 +2,25 @@ import { tool } from "ai";
 import { z } from "zod";
 import { findRelevantChunks } from "./rag";
 import { getSkillByName, skills } from "./system-prompt";
-import { searchWeb } from "./web-search";
+import { deepSearch, searchWeb } from "./web-search";
 
 // TODO: implement real API calls using createApiClient
 
 export function createTools(_token: string) {
   return {
+    deepSearch: tool({
+      description:
+        "Run an AI-assisted deep search. Uses a NVIDIA model to plan multiple focused search queries, executes configured web/retrieval search, and returns a source-backed research summary.",
+      execute: async ({ query }) => deepSearch(query),
+      inputSchema: z.object({
+        query: z
+          .string()
+          .min(2)
+          .max(500)
+          .describe("The research question to investigate deeply."),
+      }),
+    }),
+
     getItemById: tool({
       description: "Fetches a single item by its ID from the API.",
       execute: async ({ id: _id }) => ({ item: null }),

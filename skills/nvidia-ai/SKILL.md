@@ -14,7 +14,7 @@ Use this skill when the user asks for NVIDIA-specific behavior, model selection,
 - NVIDIA image generation uses `createDocument` with `kind: "image"`.
 - NVIDIA image editing uses `createDocument` with `kind: "image"` and `sourceImageUrl`, or `updateDocument` for an existing image artifact.
 - Image requests always pass through the NVIDIA safety model first.
-- NVIDIA-backed web/deep search uses `NVIDIA_SEARCH_API_URL` when configured.
+- NVIDIA-backed web/deep search uses `NVIDIA_SEARCH_API_URL` when configured. Deep search uses a NVIDIA model to plan focused subqueries before retrieval.
 
 ## Required Configuration
 

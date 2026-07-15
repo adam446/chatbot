@@ -1,10 +1,19 @@
+import { generateText } from "ai";
 import { z } from "zod";
+import { getLanguageModel } from "./ai/providers";
 
 export type WebSearchResult = {
   title: string;
   url: string;
   snippet: string;
   source?: string;
+};
+
+type WebSearchResponse = {
+  configured: boolean;
+  message?: string;
+  provider: string | null;
+  results: WebSearchResult[];
 };
 
 const tavilyResultSchema = z.object({
@@ -186,7 +195,76 @@ async function searchNvidia(query: string): Promise<WebSearchResult[]> {
   return [];
 }
 
-export async function searchWeb(query: string) {
+const deepSearchPlanSchema = z.object({
+  queries: z.array(z.string().min(2).max(300)).min(1).max(5),
+});
+
+function parseJsonObject(text: string) {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const candidate = fenced ?? text.match(/\{[\s\S]*\}/)?.[0] ?? text;
+  return JSON.parse(candidate);
+}
+
+function uniqueResults(results: WebSearchResult[]) {
+  const seen = new Set<string>();
+  return results.filter((result) => {
+    const key = result.url || `${result.title}:${result.snippet}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+async function planDeepSearchQueries(query: string) {
+  if (!process.env.NVIDIA_API_KEY) {
+    return [query];
+  }
+
+  try {
+    const { text } = await generateText({
+      model: getLanguageModel("nvidia:nvidia/nemotron-3-ultra-550b-a55b"),
+      prompt: `Create 3 to 5 focused web/retrieval search queries for this research question.
+Return only JSON in this exact shape: {"queries":["..."]}.
+Question: ${query}`,
+    });
+    const parsed = deepSearchPlanSchema.parse(parseJsonObject(text));
+    return Array.from(new Set([query, ...parsed.queries])).slice(0, 5);
+  } catch {
+    return [query];
+  }
+}
+
+function buildDeepSearchSummary({
+  query,
+  plannedQueries,
+  provider,
+  results,
+}: {
+  query: string;
+  plannedQueries: string[];
+  provider: string | null;
+  results: WebSearchResult[];
+}) {
+  const sourceLines = results
+    .map(
+      (result, index) =>
+        `${index + 1}. ${result.title}\nURL: ${result.url}\nSnippet: ${result.snippet}`
+    )
+    .join("\n\n");
+
+  return [
+    `Deep search completed for: ${query}`,
+    `Provider: ${provider ?? "unknown"}`,
+    `Queries used: ${plannedQueries.join(" | ")}`,
+    "",
+    "Sources found:",
+    sourceLines || "No sources found.",
+  ].join("\n");
+}
+
+export async function searchWeb(query: string): Promise<WebSearchResponse> {
   const errors: string[] = [];
 
   if (process.env.NVIDIA_SEARCH_API_URL) {
@@ -231,5 +309,43 @@ export async function searchWeb(query: string) {
       "Web search is not configured. Set NVIDIA_SEARCH_API_URL for NVIDIA-backed search, or TAVILY_API_KEY / BRAVE_SEARCH_API_KEY for external search.",
     provider: null,
     results: [],
+  };
+}
+
+export async function deepSearch(query: string) {
+  const plannedQueries = await planDeepSearchQueries(query);
+  const searches = await Promise.all(plannedQueries.map((q) => searchWeb(q)));
+  const configured = searches.some((search) => search.configured);
+  const provider = searches.find((search) => search.provider)?.provider ?? null;
+  const results = uniqueResults(searches.flatMap((search) => search.results));
+  const messages = searches
+    .map((search) => search.message)
+    .filter((message): message is string => Boolean(message));
+
+  if (!configured) {
+    return {
+      configured: false,
+      message:
+        messages[0] ??
+        "Deep search is not configured. Set NVIDIA_SEARCH_API_URL for NVIDIA-backed search.",
+      plannedQueries,
+      provider: null,
+      results: [],
+      summary: "",
+    };
+  }
+
+  return {
+    configured: true,
+    message: messages[0],
+    plannedQueries,
+    provider,
+    results,
+    summary: buildDeepSearchSummary({
+      plannedQueries,
+      provider,
+      query,
+      results,
+    }),
   };
 }
