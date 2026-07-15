@@ -122,16 +122,9 @@ export function AppSidebar({ user }: { user: User | undefined }) {
           <SidebarGroup className="pt-1">
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    className="h-8 rounded-lg border border-sidebar-border text-[13px] text-sidebar-foreground/70 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                    onClick={handleNewChat}
-                    tooltip="New Chat"
-                  >
-                    <PenSquareIcon className="size-4" />
-                    <span className="font-medium">New chat</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
+                  Features
+                </div>
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
@@ -142,6 +135,16 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                       <Gamepad2Icon className="size-4" />
                       <span className="font-medium">Game</span>
                     </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    className="h-8 rounded-lg border border-sidebar-border text-[13px] text-sidebar-foreground/70 transition-colors duration-150 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    onClick={handleNewChat}
+                    tooltip="New Chat"
+                  >
+                    <PenSquareIcon className="size-4" />
+                    <span className="font-medium">New chat</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 {user ? (
