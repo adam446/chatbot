@@ -1,6 +1,16 @@
 "use client";
 
-import { BarChart3, CalendarDays, Play, RotateCcw, Trophy } from "lucide-react";
+import {
+  BarChart3,
+  CalendarDays,
+  MessageSquare,
+  Play,
+  Plus,
+  RotateCcw,
+  Trophy,
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +64,12 @@ type LeaderboardRow = {
   userId: string;
   winRate: number;
   wins: number;
+};
+
+type RecentChat = {
+  createdAt: string;
+  id: string;
+  title: string;
 };
 
 const stateClass: Record<LetterState, string> = {
@@ -120,6 +136,7 @@ function normalizeInput(value: string) {
 }
 
 export default function GamePage() {
+  const router = useRouter();
   const [mode, setMode] = useState<GameMode>("free");
   const [length, setLength] = useState(5);
   const [maxGuesses, setMaxGuesses] = useState(6);
@@ -132,14 +149,17 @@ export default function GamePage() {
     global: LeaderboardRow[];
     daily: LeaderboardRow[];
   }>({ daily: [], global: [] });
+  const [recentChats, setRecentChats] = useState<RecentChat[]>([]);
 
   const rows = useMemo(() => emptyRows(game, guess), [game, guess]);
 
   const refreshMeta = useCallback(async () => {
-    const [historyResponse, leaderboardResponse] = await Promise.all([
-      fetch("/api/game/history"),
-      fetch("/api/game/leaderboard"),
-    ]);
+    const [historyResponse, leaderboardResponse, chatHistoryResponse] =
+      await Promise.all([
+        fetch("/api/game/history"),
+        fetch("/api/game/leaderboard"),
+        fetch("/api/history?limit=8"),
+      ]);
 
     if (historyResponse.ok) {
       const data = await historyResponse.json();
@@ -152,6 +172,11 @@ export default function GamePage() {
         daily: data.daily ?? [],
         global: data.global ?? [],
       });
+    }
+
+    if (chatHistoryResponse.ok) {
+      const data = await chatHistoryResponse.json();
+      setRecentChats(data.chats ?? []);
     }
   }, []);
 
@@ -235,6 +260,16 @@ export default function GamePage() {
     [game?.length]
   );
 
+  const handleChatOpen = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      const chatId = event.target.value;
+      if (chatId) {
+        router.push(`/chat/${chatId}`);
+      }
+    },
+    [router]
+  );
+
   async function submitGuess(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -293,20 +328,50 @@ export default function GamePage() {
               Devine le mot
             </h1>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button disabled={loading} onClick={startFreeGame} type="button">
-              <Play />
-              Partie libre
-            </Button>
-            <Button
-              disabled={loading}
-              onClick={startDailyGame}
-              type="button"
-              variant="secondary"
-            >
-              <CalendarDays />
-              Mot du jour
-            </Button>
+          <div className="flex flex-col gap-2 sm:items-end">
+            <nav className="flex flex-wrap gap-2" aria-label="Chat navigation">
+              <Button asChild variant="outline">
+                <Link href="/">
+                  <Plus />
+                  New chat
+                </Link>
+              </Button>
+              <label className="relative">
+                <span className="sr-only">Open chat</span>
+                <div className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground">
+                  <MessageSquare className="size-4" />
+                </div>
+                <select
+                  className="h-9 min-w-[200px] rounded-lg border border-input bg-input/30 pr-3 pl-9 text-sm"
+                  defaultValue=""
+                  onChange={handleChatOpen}
+                >
+                  <option value="">
+                    {recentChats.length === 0 ? "No chats" : "Open chat"}
+                  </option>
+                  {recentChats.map((chat) => (
+                    <option key={chat.id} value={chat.id}>
+                      {chat.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </nav>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={loading} onClick={startFreeGame} type="button">
+                <Play />
+                Partie libre
+              </Button>
+              <Button
+                disabled={loading}
+                onClick={startDailyGame}
+                type="button"
+                variant="secondary"
+              >
+                <CalendarDays />
+                Mot du jour
+              </Button>
+            </div>
           </div>
         </header>
 
