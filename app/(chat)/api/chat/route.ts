@@ -51,6 +51,7 @@ import { type PostRequestBody, postRequestBodySchema } from "./schema";
 export const maxDuration = 60;
 
 const HEALTH_CHECK_DELAY_MS = 9000;
+const BOTID_ENABLED = process.env.NEXT_PUBLIC_BOTID_ENABLED === "1";
 
 function isModelStreamActivity(chunk: { type: string }) {
   return !["start", "start-step", "finish-step", "finish", "raw"].includes(
@@ -89,7 +90,7 @@ export async function POST(request: Request) {
     } = requestBody;
 
     const [botIdResult, session] = await Promise.all([
-      checkBotId().catch(() => null),
+      BOTID_ENABLED ? checkBotId().catch(() => null) : Promise.resolve(null),
       auth(),
     ]);
 

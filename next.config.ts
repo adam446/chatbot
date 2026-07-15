@@ -2,6 +2,7 @@ import { withBotId } from "botid/next/config";
 import type { NextConfig } from "next";
 
 const basePath = process.env.IS_DEMO === "1" ? "/demo" : "";
+const botIdEnabled = process.env.NEXT_PUBLIC_BOTID_ENABLED === "1";
 
 const nextConfig: NextConfig = {
   ...(basePath
@@ -22,6 +23,7 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   env: {
     NEXT_PUBLIC_BASE_PATH: basePath,
+    NEXT_PUBLIC_BOTID_ENABLED: botIdEnabled ? "1" : "0",
   },
   experimental: {
     appNewScrollHandler: true,
@@ -51,4 +53,4 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
 };
 
-export default withBotId(nextConfig);
+export default botIdEnabled ? withBotId(nextConfig) : nextConfig;
