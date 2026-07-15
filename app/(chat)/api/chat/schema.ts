@@ -30,6 +30,7 @@ export const postRequestBodySchema = z.object({
   id: z.uuid(),
   message: userMessageSchema.optional(),
   messages: z.array(toolApprovalMessageSchema).optional(),
+  searchMode: z.enum(["off", "search", "deep"]).optional().default("off"),
   selectedChatModel: z.string(),
   selectedVisibilityType: z.enum(["public", "private"]),
 });

@@ -8,6 +8,7 @@ import {
   BrainIcon,
   EyeIcon,
   LockIcon,
+  SearchIcon,
   WrenchIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -63,6 +64,8 @@ import {
 } from "./slash-commands";
 import { SuggestedActions } from "./suggested-actions";
 import type { VisibilityType } from "./visibility-selector";
+
+type SearchMode = "off" | "search" | "deep";
 
 function setCookie(name: string, value: string) {
   const maxAge = 60 * 60 * 24 * 365;
@@ -146,6 +149,7 @@ function PureMultimodalInput({
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashQuery, setSlashQuery] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
+  const [searchMode, setSearchMode] = useState<SearchMode>("off");
 
   const handleInput = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -233,21 +237,28 @@ function PureMultimodalInput({
       `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/chat/${chatId}`
     );
 
-    sendMessage({
-      parts: [
-        ...attachments.map((attachment) => ({
-          mediaType: attachment.contentType,
-          name: attachment.name,
-          type: "file" as const,
-          url: attachment.url,
-        })),
-        {
-          text: input,
-          type: "text",
+    (sendMessage as UseChatHelpers<ChatMessage>["sendMessage"])(
+      {
+        parts: [
+          ...attachments.map((attachment) => ({
+            mediaType: attachment.contentType,
+            name: attachment.name,
+            type: "file" as const,
+            url: attachment.url,
+          })),
+          {
+            text: input,
+            type: "text",
+          },
+        ],
+        role: "user",
+      },
+      {
+        body: {
+          searchMode,
         },
-      ],
-      role: "user",
-    });
+      }
+    );
 
     setAttachments([]);
     setLocalStorageInput("");
@@ -265,6 +276,7 @@ function PureMultimodalInput({
     setLocalStorageInput,
     width,
     chatId,
+    searchMode,
   ]);
 
   const uploadFile = useCallback(async (file: File) => {
@@ -554,6 +566,11 @@ function PureMultimodalInput({
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
             />
+            <SearchModeControls
+              searchMode={searchMode}
+              setSearchMode={setSearchMode}
+              status={status}
+            />
           </PromptInputTools>
 
           {status === "submitted" ? (
@@ -680,6 +697,81 @@ function PureAttachmentsButton({
 }
 
 const AttachmentsButton = memo(PureAttachmentsButton);
+
+function PureSearchModeControls({
+  searchMode,
+  setSearchMode,
+  status,
+}: {
+  searchMode: SearchMode;
+  setSearchMode: Dispatch<SetStateAction<SearchMode>>;
+  status: UseChatHelpers<ChatMessage>["status"];
+}) {
+  const disabled = status !== "ready" && status !== "error";
+
+  const toggleSearch = useCallback(() => {
+    setSearchMode((current) => (current === "search" ? "off" : "search"));
+  }, [setSearchMode]);
+
+  const toggleDeepSearch = useCallback(() => {
+    setSearchMode((current) => (current === "deep" ? "off" : "deep"));
+  }, [setSearchMode]);
+
+  return (
+    <div className="flex items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-pressed={searchMode === "search"}
+            className={cn(
+              "h-7 gap-1.5 rounded-lg border px-2 text-[12px] transition-colors",
+              searchMode === "search"
+                ? "border-foreground/20 bg-foreground text-background hover:bg-foreground/90"
+                : "border-border/40 text-muted-foreground hover:border-border hover:text-foreground"
+            )}
+            data-testid="search-mode-button"
+            disabled={disabled}
+            onClick={toggleSearch}
+            type="button"
+            variant="ghost"
+          >
+            <SearchIcon className="size-3.5" />
+            <span className="hidden sm:inline">Search</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={8}>
+          Search the web before answering
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            aria-pressed={searchMode === "deep"}
+            className={cn(
+              "h-7 w-7 rounded-lg border p-1 transition-colors",
+              searchMode === "deep"
+                ? "border-foreground/20 bg-foreground text-background hover:bg-foreground/90"
+                : "border-border/40 text-muted-foreground hover:border-border hover:text-foreground"
+            )}
+            data-testid="deep-search-mode-button"
+            disabled={disabled}
+            onClick={toggleDeepSearch}
+            type="button"
+            variant="ghost"
+          >
+            <BrainIcon className="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={8}>
+          Deep search with multiple web queries
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+const SearchModeControls = memo(PureSearchModeControls);
 
 function ModelSelectorOption({
   capabilities,

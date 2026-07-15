@@ -79,8 +79,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { id, message, messages, selectedChatModel, selectedVisibilityType } =
-      requestBody;
+    const {
+      id,
+      message,
+      messages,
+      searchMode,
+      selectedChatModel,
+      selectedVisibilityType,
+    } = requestBody;
 
     const [botIdResult, session] = await Promise.all([
       checkBotId().catch(() => null),
@@ -262,6 +268,13 @@ export async function POST(request: Request) {
           request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ??
           "";
 
+        const searchInstructions =
+          searchMode === "search"
+            ? "\n\nSearch mode is enabled for this turn. Before answering, call searchWeb with a focused query and base the answer on the search results. If searchWeb is not configured or returns no useful result, say that clearly."
+            : searchMode === "deep"
+              ? "\n\nDeep search mode is enabled for this turn. Before answering, call searchWeb multiple times with distinct focused queries, compare the results, and synthesize a careful answer with source links when available. If searchWeb is not configured or returns no useful result, say that clearly."
+              : "";
+
         const result = streamText({
           activeTools:
             isReasoningModel && !supportsTools
@@ -279,7 +292,7 @@ export async function POST(request: Request) {
                   "updateDocument",
                   "requestSuggestions",
                 ],
-          instructions: buildSystemPrompt(),
+          instructions: `${buildSystemPrompt()}${searchInstructions}`,
           messages: modelMessages,
           model: getLanguageModel(chatModel),
           onAbort() {
