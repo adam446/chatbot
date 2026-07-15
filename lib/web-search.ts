@@ -118,6 +118,70 @@ export function rankSearchResultsForAnswer(results: WebSearchResult[]) {
   );
 }
 
+function getOfficialSource(result: WebSearchResult) {
+  try {
+    const hostname = new URL(result.url).hostname.toLowerCase();
+    return (
+      hostname.endsWith(".gc.ca") ||
+      hostname.endsWith(".gov") ||
+      hostname.includes(".gov.") ||
+      hostname.includes("canada.ca") ||
+      hostname.includes("pm.gc.ca")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function extractCanadaPrimeMinisterName(text: string) {
+  return (
+    text.match(
+      /The Right Honourable\s+([A-Z][A-Za-zÀ-ÿ'’-]+(?:\s+[A-Z][A-Za-zÀ-ÿ'’-]+){1,3}),\s+Prime Minister of Canada/i
+    )?.[1] ??
+    text.match(
+      /([A-Z][A-Za-zÀ-ÿ'’-]+(?:\s+[A-Z][A-Za-zÀ-ÿ'’-]+){1,3})\s+is\s+Canada[’']s\s+(?:\d+(?:st|nd|rd|th)\s+)?Prime Minister/i
+    )?.[1] ??
+    null
+  );
+}
+
+export function buildVerifiedSearchAnswer({
+  query,
+  results,
+}: {
+  query: string;
+  results: WebSearchResult[];
+}) {
+  const normalizedQuery = query.toLowerCase();
+  const asksCanadaPrimeMinister =
+    /\b(canada|canadien|canadienne)\b/.test(normalizedQuery) &&
+    /\b(prime minister|premier ministre)\b/.test(normalizedQuery);
+
+  if (!asksCanadaPrimeMinister) {
+    return null;
+  }
+
+  const officialResult = results.find(getOfficialSource);
+  if (!officialResult) {
+    return null;
+  }
+
+  const name = extractCanadaPrimeMinisterName(
+    `${officialResult.title} ${officialResult.snippet}`
+  );
+  if (!name) {
+    return null;
+  }
+
+  return [
+    `Verified answer from the highest-priority official source: ${name} is the current Prime Minister of Canada.`,
+    `Answer in the user's language and cite this source: ${officialResult.title} (${officialResult.url}).`,
+    "",
+    `Réponse de secours si le modèle ne génère aucun texte: Le premier ministre actuel du Canada est **${name}**.`,
+    `Source: [${officialResult.title}](${officialResult.url})`,
+  ].join("\n");
+}
+
 function cleanResults(results: WebSearchResult[]) {
   return rankSearchResultsForAnswer(
     results.filter((result) => result.title && result.url)
@@ -381,7 +445,9 @@ export async function deepSearch(query: string) {
   const searches = await Promise.all(plannedQueries.map((q) => searchWeb(q)));
   const configured = searches.some((search) => search.configured);
   const provider = searches.find((search) => search.provider)?.provider ?? null;
-  const results = uniqueResults(searches.flatMap((search) => search.results));
+  const results = rankSearchResultsForAnswer(
+    uniqueResults(searches.flatMap((search) => search.results))
+  );
   const messages = searches
     .map((search) => search.message)
     .filter((message): message is string => Boolean(message));
