@@ -1,5 +1,3 @@
-import { buildSystemPrompt } from "@/lib/system-prompt";
-import { createTools } from "@/lib/tools";
 import { ipAddress } from "@vercel/functions";
 import {
   convertToModelMessages,
@@ -43,6 +41,8 @@ import {
 import type { DBMessage } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
 import { checkIpRateLimit } from "@/lib/ratelimit";
+import { buildSystemPrompt } from "@/lib/system-prompt";
+import { createTools } from "@/lib/tools";
 import type { ChatMessage, WaitingStatusData } from "@/lib/types";
 import { convertToUIMessages, generateUUID } from "@/lib/utils";
 import { generateTitleFromUserMessage } from "../../actions";
@@ -268,6 +268,7 @@ export async function POST(request: Request) {
               ? []
               : [
                   "searchDocuments",
+                  "searchWeb",
                   "getSkillDetails",
                   "getItems",
                   "getItemById",
