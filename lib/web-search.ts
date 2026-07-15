@@ -16,6 +16,24 @@ type WebSearchResponse = {
   results: WebSearchResult[];
 };
 
+export function getWebSearchDebugInfo() {
+  const configuredProviders = [
+    process.env.NVIDIA_SEARCH_API_URL ? "nvidia" : null,
+    process.env.TAVILY_API_KEY ? "tavily" : null,
+    process.env.BRAVE_SEARCH_API_KEY ? "brave" : null,
+  ].filter((provider): provider is string => Boolean(provider));
+
+  return {
+    configuredProviders,
+    hasBraveSearchApiKey: Boolean(process.env.BRAVE_SEARCH_API_KEY),
+    hasNvidiaApiKey: Boolean(process.env.NVIDIA_API_KEY),
+    hasNvidiaSearchApiKey: Boolean(process.env.NVIDIA_SEARCH_API_KEY),
+    hasNvidiaSearchApiUrl: Boolean(process.env.NVIDIA_SEARCH_API_URL),
+    hasTavilyApiKey: Boolean(process.env.TAVILY_API_KEY),
+    searchConfigured: configuredProviders.length > 0,
+  };
+}
+
 const tavilyResultSchema = z.object({
   content: z.string().optional(),
   title: z.string().optional(),
