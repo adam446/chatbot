@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftIcon } from "lucide-react";
+import { Gamepad2Icon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
 import { memo } from "react";
 import { Button } from "@/components/ui/button";
@@ -50,9 +50,16 @@ function PureChatHeader({
         />
       )}
 
+      <Button asChild className="ml-auto rounded-lg" size="sm" variant="outline">
+        <Link href="/game">
+          <Gamepad2Icon className="size-4" />
+          Game
+        </Link>
+      </Button>
+
       <Button
         asChild
-        className="hidden rounded-lg bg-foreground px-4 text-background hover:bg-foreground/90 md:ml-auto md:flex"
+        className="hidden rounded-lg bg-foreground px-4 text-background hover:bg-foreground/90 md:flex"
       >
         <Link
           href="https://vercel.com/templates/next.js/chatbot"
