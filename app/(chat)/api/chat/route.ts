@@ -104,7 +104,10 @@ function formatServerSearchContext(
   return [
     `\n\nServer-side ${mode} results are already available for this turn.`,
     `Provider: ${search.provider ?? "unknown"}`,
-    "Use these sources before relying on model memory. Cite the relevant URLs in the answer.",
+    "Use these ranked sources before relying on model memory. The first source is the highest-priority source after server-side ranking.",
+    "If sources conflict, prefer official government or primary-source domains over Wikipedia, social media, or older secondary summaries.",
+    "Do not assume the first raw web result is correct unless it is also the highest-priority ranked source below.",
+    "Cite the relevant URLs in the answer.",
     "Sources:",
     sources,
     "Do not say web search is unavailable when server-side results are provided above.",

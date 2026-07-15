@@ -73,9 +73,55 @@ const flexibleSearchResponseSchema = z.object({
   sources: z.array(flexibleSearchResultSchema).optional(),
 });
 
+function getSearchResultScore(result: WebSearchResult) {
+  let score = 0;
+  const combined =
+    `${result.title} ${result.url} ${result.snippet}`.toLowerCase();
+
+  try {
+    const hostname = new URL(result.url).hostname.toLowerCase();
+    if (
+      hostname.endsWith(".gc.ca") ||
+      hostname.endsWith(".gov") ||
+      hostname.includes(".gov.") ||
+      hostname.includes("canada.ca") ||
+      hostname.includes("pm.gc.ca")
+    ) {
+      score += 100;
+    }
+    if (
+      hostname.includes("wikipedia.org") ||
+      hostname.includes("facebook.com") ||
+      hostname.includes("x.com") ||
+      hostname.includes("twitter.com")
+    ) {
+      score -= 30;
+    }
+  } catch {
+    score -= 5;
+  }
+
+  if (
+    /\b(current|official|actuel|actuelle|prime minister|premier ministre)\b/.test(
+      combined
+    )
+  ) {
+    score += 10;
+  }
+
+  return score;
+}
+
+export function rankSearchResultsForAnswer(results: WebSearchResult[]) {
+  return [...results].sort(
+    (a, b) => getSearchResultScore(b) - getSearchResultScore(a)
+  );
+}
+
 function cleanResults(results: WebSearchResult[]) {
-  return results
-    .filter((result) => result.title && result.url)
+  return rankSearchResultsForAnswer(
+    results.filter((result) => result.title && result.url)
+  )
     .slice(0, 5)
     .map((result) => ({
       snippet: result.snippet.slice(0, 700),

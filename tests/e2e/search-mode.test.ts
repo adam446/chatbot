@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { postRequestBodySchema } from "@/app/(chat)/api/chat/schema";
 import { getAutomaticSearchMode } from "@/lib/search-mode";
+import { rankSearchResultsForAnswer } from "@/lib/web-search";
 
 test.describe("Search mode detection", () => {
   test("detects freshness-sensitive prompts", () => {
@@ -56,6 +57,23 @@ test.describe("Search mode detection", () => {
       postRequestBodySchema.parse({ ...baseBody, searchMode: "deep" })
         .searchMode
     ).toBe("deep");
+  });
+
+  test("ranks official sources before older secondary sources", () => {
+    const ranked = rankSearchResultsForAnswer([
+      {
+        snippet: "Justin Trudeau served as prime minister from 2015 to 2025.",
+        title: "Justin Trudeau",
+        url: "https://en.wikipedia.org/wiki/Justin_Trudeau",
+      },
+      {
+        snippet: "Mark Carney is Canada's 24th Prime Minister.",
+        title: "About | Prime Minister of Canada",
+        url: "https://www.pm.gc.ca/en/about",
+      },
+    ]);
+
+    expect(ranked[0].url).toBe("https://www.pm.gc.ca/en/about");
   });
 });
 
