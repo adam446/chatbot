@@ -1,6 +1,7 @@
 import { tool, type UIMessageStreamWriter } from "ai";
 import type { Session } from "next-auth";
 import { z } from "zod";
+import { isImageSafetyBlockError } from "@/lib/ai/image-safety";
 import {
   artifactKinds,
   documentHandlersByArtifactKind,
@@ -21,8 +22,8 @@ export const createDocument = ({
 }: CreateDocumentProps) =>
   tool({
     description:
-      "Create an artifact. You MUST specify kind: use 'code' for any programming/algorithm request (creates a script), 'text' for essays/writing (creates a document), 'sheet' for spreadsheets/data.",
-    execute: async ({ title, kind }) => {
+      "Create an artifact. You MUST specify kind: use 'code' for any programming/algorithm request (creates a script), 'text' for essays/writing (creates a document), 'sheet' for spreadsheets/data, 'image' for image generation or editing from an uploaded image. Image requests always run server-side NVIDIA safety before generation.",
+    execute: async ({ title, kind, sourceImageUrl }) => {
       const id = generateUUID();
 
       dataStream.write({
@@ -58,13 +59,44 @@ export const createDocument = ({
         throw new Error(`No document handler found for kind: ${kind}`);
       }
 
-      await documentHandler.onCreateDocument({
-        dataStream,
-        id,
-        modelId,
-        session,
-        title,
-      });
+      try {
+        await documentHandler.onCreateDocument({
+          dataStream,
+          id,
+          modelId,
+          session,
+          sourceImageUrl,
+          title,
+        });
+      } catch (error) {
+        dataStream.write({ data: null, transient: true, type: "data-finish" });
+
+        if (isImageSafetyBlockError(error)) {
+          return {
+            blocked: true,
+            categories: error.categories,
+            error: error.message,
+            id,
+            kind,
+            reason: error.reason,
+            title,
+          };
+        }
+
+        if (kind === "image") {
+          return {
+            error:
+              error instanceof Error
+                ? `Image generation failed closed: ${error.message}`
+                : "Image generation failed closed.",
+            id,
+            kind,
+            title,
+          };
+        }
+
+        throw error;
+      }
 
       dataStream.write({ data: null, transient: true, type: "data-finish" });
 
@@ -72,7 +104,9 @@ export const createDocument = ({
         content:
           kind === "code"
             ? "A script was created and is now visible to the user."
-            : "A document was created and is now visible to the user.",
+            : kind === "image"
+              ? "An image was created and is now visible to the user."
+              : "A document was created and is now visible to the user.",
         id,
         kind,
         title,
@@ -82,7 +116,14 @@ export const createDocument = ({
       kind: z
         .enum(artifactKinds)
         .describe(
-          "REQUIRED. 'code' for programming/algorithms, 'text' for essays/writing, 'sheet' for spreadsheets"
+          "REQUIRED. 'code' for programming/algorithms, 'text' for essays/writing, 'sheet' for spreadsheets, 'image' for image generation or image editing"
+        ),
+      sourceImageUrl: z
+        .string()
+        .url()
+        .optional()
+        .describe(
+          "Optional. For editing an uploaded PNG/JPEG, pass the attachment URL from the user's message. Leave empty for text-to-image generation."
         ),
       title: z.string().describe("The title of the artifact"),
     }),

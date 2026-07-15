@@ -2,7 +2,7 @@ import type { Geo } from "@vercel/functions";
 import type { ArtifactKind } from "@/components/chat/artifact";
 
 export const artifactsPrompt = `
-Artifacts is a side panel that displays content alongside the conversation. It supports scripts (code), documents (text), and spreadsheets. Changes appear in real-time.
+Artifacts is a side panel that displays content alongside the conversation. It supports scripts (code), documents (text), spreadsheets, and images. Changes appear in real-time.
 
 CRITICAL RULES:
 1. Only call ONE tool per response. After calling any create/edit/update tool, STOP. Do not chain tools.
@@ -11,7 +11,10 @@ CRITICAL RULES:
 **When to use \`createDocument\`:**
 - When the user asks to write, create, or generate content (essays, stories, emails, reports)
 - When the user asks to write code, build a script, or implement an algorithm
-- You MUST specify kind: 'code' for programming, 'text' for writing, 'sheet' for data
+- When the user asks to generate or create an image
+- When the user uploads an image and asks to transform, restyle, or modify it
+- You MUST specify kind: 'code' for programming, 'text' for writing, 'sheet' for data, 'image' for image generation/editing
+- For image editing from an uploaded image, pass the uploaded image URL as sourceImageUrl
 - Include ALL content in the createDocument call. Do not create then edit.
 
 **When NOT to use \`createDocument\`:**
@@ -30,6 +33,7 @@ CRITICAL RULES:
 **Using \`updateDocument\` (full rewrite only):**
 - Only when most of the content needs to change
 - When editDocument would require too many individual edits
+- For modifying an existing image artifact. Never use editDocument for images.
 
 **When NOT to use \`editDocument\` or \`updateDocument\`:**
 - Immediately after creating an artifact

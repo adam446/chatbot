@@ -1,6 +1,7 @@
 import { tool, type UIMessageStreamWriter } from "ai";
 import type { Session } from "next-auth";
 import { z } from "zod";
+import { isImageSafetyBlockError } from "@/lib/ai/image-safety";
 import { documentHandlersByArtifactKind } from "@/lib/artifacts/server";
 import { getDocumentById } from "@/lib/db/queries";
 import type { ChatMessage } from "@/lib/types";
@@ -18,7 +19,7 @@ export const updateDocument = ({
 }: UpdateDocumentProps) =>
   tool({
     description:
-      "Full rewrite of an existing artifact. Only use for major changes where most content needs replacing. Prefer editDocument for targeted changes.",
+      "Full rewrite of an existing artifact. Use this to modify existing image artifacts, or for major text/code/sheet changes where most content needs replacing. Prefer editDocument for targeted non-image changes.",
     execute: async ({ id, description }) => {
       const document = await getDocumentById({ id });
 
@@ -47,13 +48,43 @@ export const updateDocument = ({
         throw new Error(`No document handler found for kind: ${document.kind}`);
       }
 
-      await documentHandler.onUpdateDocument({
-        dataStream,
-        description,
-        document,
-        modelId,
-        session,
-      });
+      try {
+        await documentHandler.onUpdateDocument({
+          dataStream,
+          description,
+          document,
+          modelId,
+          session,
+        });
+      } catch (error) {
+        dataStream.write({ data: null, transient: true, type: "data-finish" });
+
+        if (isImageSafetyBlockError(error)) {
+          return {
+            blocked: true,
+            categories: error.categories,
+            error: error.message,
+            id,
+            kind: document.kind,
+            reason: error.reason,
+            title: document.title,
+          };
+        }
+
+        if (document.kind === "image") {
+          return {
+            error:
+              error instanceof Error
+                ? `Image editing failed closed: ${error.message}`
+                : "Image editing failed closed.",
+            id,
+            kind: document.kind,
+            title: document.title,
+          };
+        }
+
+        throw error;
+      }
 
       dataStream.write({ data: null, transient: true, type: "data-finish" });
 
@@ -61,7 +92,9 @@ export const updateDocument = ({
         content:
           document.kind === "code"
             ? "The script has been updated successfully."
-            : "The document has been updated successfully.",
+            : document.kind === "image"
+              ? "The image has been updated successfully."
+              : "The document has been updated successfully.",
         id,
         kind: document.kind,
         title: document.title,

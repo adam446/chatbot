@@ -1,6 +1,7 @@
 import type { UIMessageStreamWriter } from "ai";
 import type { Session } from "next-auth";
 import { codeDocumentHandler } from "@/artifacts/code/server";
+import { imageDocumentHandler } from "@/artifacts/image/server";
 import { sheetDocumentHandler } from "@/artifacts/sheet/server";
 import { textDocumentHandler } from "@/artifacts/text/server";
 import type { ArtifactKind } from "@/components/chat/artifact";
@@ -22,6 +23,7 @@ export type CreateDocumentCallbackProps = {
   dataStream: UIMessageStreamWriter<ChatMessage>;
   session: Session;
   modelId: string;
+  sourceImageUrl?: string;
 };
 
 export type UpdateDocumentCallbackProps = {
@@ -51,6 +53,7 @@ export function createDocumentHandler<T extends ArtifactKind>(config: {
         id: args.id,
         modelId: args.modelId,
         session: args.session,
+        sourceImageUrl: args.sourceImageUrl,
         title: args.title,
       });
 
@@ -90,6 +93,7 @@ export const documentHandlersByArtifactKind: DocumentHandler[] = [
   textDocumentHandler,
   codeDocumentHandler,
   sheetDocumentHandler,
+  imageDocumentHandler,
 ];
 
-export const artifactKinds = ["text", "code", "sheet"] as const;
+export const artifactKinds = ["text", "code", "sheet", "image"] as const;

@@ -24,6 +24,13 @@ export const editDocument = ({ session, dataStream }: EditDocumentProps) =>
         return { error: "Forbidden" };
       }
 
+      if (document.kind === "image") {
+        return {
+          error:
+            "Image artifacts cannot be edited with find-and-replace. Use updateDocument with an image editing description.",
+        };
+      }
+
       if (!document.content) {
         return { error: "Document has no content" };
       }
