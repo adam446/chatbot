@@ -1,8 +1,9 @@
 import { generateText } from "ai";
 import { z } from "zod";
+import { DEFAULT_MODEL } from "./models";
 import { getLanguageModel } from "./providers";
 
-const DEFAULT_SAFETY_MODEL = "nvidia:nvidia/llama-3.1-nemotron-safety-8b-v1";
+const DEFAULT_SAFETY_MODEL = DEFAULT_MODEL;
 
 const safetyResultSchema = z.object({
   allowed: z.boolean(),
@@ -39,6 +40,10 @@ function getSafetyModelId() {
   return configured.startsWith("nvidia:") ? configured : `nvidia:${configured}`;
 }
 
+function getSafetyModelIds() {
+  return [...new Set([getSafetyModelId(), DEFAULT_MODEL])];
+}
+
 function parseSafetyJson(text: string): ImageSafetyResult {
   const withoutFence = text
     .trim()
@@ -54,6 +59,42 @@ function parseSafetyJson(text: string): ImageSafetyResult {
   return safetyResultSchema.parse(JSON.parse(candidate));
 }
 
+async function evaluateWithFallbackModels({
+  index,
+  modelIds,
+  prompt,
+}: {
+  index: number;
+  modelIds: string[];
+  prompt: string;
+}): Promise<ImageSafetyResult> {
+  const modelId = modelIds[index];
+
+  if (!modelId) {
+    throw new Error("No NVIDIA safety model returned a valid response");
+  }
+
+  try {
+    const { text } = await generateText({
+      model: getLanguageModel(modelId),
+      prompt,
+      temperature: 0,
+    });
+
+    return parseSafetyJson(text);
+  } catch (error) {
+    if (index >= modelIds.length - 1) {
+      throw error;
+    }
+
+    return evaluateWithFallbackModels({
+      index: index + 1,
+      modelIds,
+      prompt,
+    });
+  }
+}
+
 export async function evaluateImageSafety({
   mode,
   prompt,
@@ -63,10 +104,7 @@ export async function evaluateImageSafety({
   prompt: string;
   sourceImagePresent?: boolean;
 }): Promise<ImageSafetyResult> {
-  try {
-    const { text } = await generateText({
-      model: getLanguageModel(getSafetyModelId()),
-      prompt: `Evaluate this image ${mode} request before any image model runs.
+  const promptText = `Evaluate this image ${mode} request before any image model runs.
 
 Policy:
 - Allow fictional graphic violence, gore, horror, injuries, monsters, battle scenes, and stylized violent artwork.
@@ -78,11 +116,14 @@ Return ONLY compact JSON with this exact shape:
 
 Source image attached: ${sourceImagePresent ? "yes" : "no"}
 Request:
-${prompt}`,
-      temperature: 0,
-    });
+${prompt}`;
 
-    return parseSafetyJson(text);
+  try {
+    return await evaluateWithFallbackModels({
+      index: 0,
+      modelIds: getSafetyModelIds(),
+      prompt: promptText,
+    });
   } catch (error) {
     return {
       allowed: false,
