@@ -79,6 +79,31 @@ function getSearchQuery(message?: ChatMessage) {
   return text.slice(0, 500);
 }
 
+function getAutomaticSearchMode(query: string): "off" | "search" | "deep" {
+  const normalized = query
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+
+  if (
+    /\b(deep search|recherche approfondie|recherche profonde)\b/.test(
+      normalized
+    )
+  ) {
+    return "deep";
+  }
+
+  if (
+    /\b(search|recherche|chercher|cherche|verifie|verifier|verify|look up|lookup|en ligne|online|current|actuel|recente?|latest|source)\b/.test(
+      normalized
+    )
+  ) {
+    return "search";
+  }
+
+  return "off";
+}
+
 function formatServerSearchContext(
   mode: "search" | "deep",
   search:
@@ -317,32 +342,39 @@ export async function POST(request: Request) {
           "";
 
         const searchQuery = getSearchQuery(message as ChatMessage | undefined);
+        const automaticSearchMode = getAutomaticSearchMode(searchQuery);
+        const effectiveSearchMode =
+          searchMode === "off" ? automaticSearchMode : searchMode;
         let serverSearchContext = "";
 
-        if (searchQuery && searchMode === "search") {
+        if (searchQuery && effectiveSearchMode === "search") {
           writeWaitingStatus("waiting", "Searching...");
           const search = await searchWeb(searchQuery);
           console.info("[search] server-side search", {
+            automaticSearchMode,
             configured: search.configured,
             provider: search.provider,
+            requestedSearchMode: searchMode,
             results: search.results.length,
           });
           serverSearchContext = formatServerSearchContext("search", search);
-        } else if (searchQuery && searchMode === "deep") {
+        } else if (searchQuery && effectiveSearchMode === "deep") {
           writeWaitingStatus("waiting", "Deep searching...");
           const search = await deepSearch(searchQuery);
           console.info("[search] server-side deep search", {
+            automaticSearchMode,
             configured: search.configured,
             provider: search.provider,
+            requestedSearchMode: searchMode,
             results: search.results.length,
           });
           serverSearchContext = formatServerSearchContext("deep", search);
         }
 
         const searchInstructions =
-          searchMode === "search"
+          effectiveSearchMode === "search"
             ? "\n\nSearch mode is enabled for this turn. The server may have already injected source-backed search results below. If server-side results are present, answer from them and cite URLs. If no server-side results are present, call searchWeb with a focused query before answering. If search is not configured or returns no useful result, say that clearly."
-            : searchMode === "deep"
+            : effectiveSearchMode === "deep"
               ? "\n\nDeep search mode is enabled for this turn. The server may have already injected source-backed deep search results below. If server-side results are present, answer from them and cite URLs. If no server-side results are present, call deepSearch with the user's research question before answering. If deepSearch is not configured or returns no useful result, say that clearly."
               : "";
 
