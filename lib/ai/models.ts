@@ -1,8 +1,8 @@
-export const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
+export const DEFAULT_MODEL = "nvidia:mistralai/mistral-medium-3.5-128b";
 
-export const DEFAULT_CHAT_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_CHAT_MODEL = DEFAULT_MODEL;
 
-export const DEFAULT_GAME_MODEL = "nvidia:mistralai/mistral-medium-3.5-128b";
+export const DEFAULT_GAME_MODEL = DEFAULT_MODEL;
 
 export type ModelCapabilities = {
   tools: boolean;
@@ -20,10 +20,10 @@ export type ChatModel = {
 };
 
 export const titleModel: ChatModel = {
-  description: "Fast Anthropic model for title generation",
+  description: "NVIDIA-hosted model for title generation",
   id: DEFAULT_MODEL,
-  name: "Claude Haiku 4.5",
-  provider: "anthropic",
+  name: "Mistral Medium 3.5 128B (NVIDIA)",
+  provider: "nvidia",
 };
 
 export const chatModels: ChatModel[] = [
@@ -38,18 +38,6 @@ export const chatModels: ChatModel[] = [
     id: "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
     name: "Nemotron 3 Ultra 550B (NVIDIA)",
     provider: "nvidia",
-  },
-  {
-    description: "Anthropic's most capable model with tool use and vision",
-    id: "claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6",
-    provider: "anthropic",
-  },
-  {
-    description: "Anthropic's fastest and most compact model",
-    id: "claude-haiku-4-5-20251001",
-    name: "Claude Haiku 4.5",
-    provider: "anthropic",
   },
   {
     description: "Fast and capable model with tool use",

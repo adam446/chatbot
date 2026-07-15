@@ -42,8 +42,5 @@ export function getTitleModel() {
   if (isTestEnvironment && myProvider) {
     return myProvider.languageModel("title-model");
   }
-  if (titleModel.id.startsWith("claude-")) {
-    return anthropic(titleModel.id);
-  }
-  return gateway.languageModel(titleModel.id);
+  return getLanguageModel(titleModel.id);
 }
