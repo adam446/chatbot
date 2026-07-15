@@ -1,7 +1,14 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { customProvider, gateway } from "ai";
 import { isTestEnvironment } from "../constants";
 import { titleModel } from "./models";
+
+const nvidia = createOpenAICompatible({
+  apiKey: process.env.NVIDIA_API_KEY,
+  baseURL: "https://integrate.api.nvidia.com/v1",
+  name: "nvidia",
+});
 
 export const myProvider = isTestEnvironment
   ? (() => {
@@ -24,6 +31,9 @@ export function getLanguageModel(modelId: string) {
   }
   if (modelId.startsWith("claude-")) {
     return anthropic(modelId);
+  }
+  if (modelId.startsWith("nvidia:")) {
+    return nvidia.chatModel(modelId.replace(/^nvidia:/, ""));
   }
   return gateway.languageModel(modelId);
 }

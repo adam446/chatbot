@@ -2,6 +2,8 @@ export const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 
 export const DEFAULT_CHAT_MODEL = "claude-sonnet-4-6";
 
+export const DEFAULT_GAME_MODEL = "nvidia:mistralai/mistral-medium-3.5-128b";
+
 export type ModelCapabilities = {
   tools: boolean;
   vision: boolean;
@@ -25,6 +27,18 @@ export const titleModel: ChatModel = {
 };
 
 export const chatModels: ChatModel[] = [
+  {
+    description: "NVIDIA-hosted free endpoint for fast text generation",
+    id: "nvidia:mistralai/mistral-medium-3.5-128b",
+    name: "Mistral Medium 3.5 128B (NVIDIA)",
+    provider: "nvidia",
+  },
+  {
+    description: "NVIDIA-hosted reasoning model for agentic workflows",
+    id: "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
+    name: "Nemotron 3 Ultra 550B (NVIDIA)",
+    provider: "nvidia",
+  },
   {
     description: "Anthropic's most capable model with tool use and vision",
     id: "claude-sonnet-4-6",
@@ -81,7 +95,7 @@ export async function getCapabilities(): Promise<
 > {
   const results = await Promise.all(
     chatModels.map(async (model) => {
-      if (model.provider === "anthropic") {
+      if (model.provider === "anthropic" || model.provider === "nvidia") {
         return [model.id, { reasoning: false, tools: true, vision: true }];
       }
 

@@ -2,14 +2,17 @@ import type { InferSelectModel } from "drizzle-orm";
 import {
   boolean,
   foreignKey,
+  integer,
   json,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
-  vector,
   varchar,
+  vector,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("User", {
@@ -149,3 +152,59 @@ export const documentChunk = pgTable("DocumentChunk", {
 });
 
 export type DocumentChunk = InferSelectModel<typeof documentChunk>;
+
+export const wordGameDailyWord = pgTable(
+  "WordGameDailyWord",
+  {
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    date: varchar("date", { length: 10 }).notNull(),
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    length: integer("length").notNull(),
+    normalizedWord: varchar("normalizedWord", { length: 32 }).notNull(),
+    word: varchar("word", { length: 32 }).notNull(),
+  },
+  (table) => ({
+    dailyWordIdx: uniqueIndex("WordGameDailyWord_date_length_idx").on(
+      table.date,
+      table.length
+    ),
+  })
+);
+
+export type WordGameDailyWord = InferSelectModel<typeof wordGameDailyWord>;
+
+export const wordGame = pgTable("WordGame", {
+  attemptsUsed: integer("attemptsUsed").notNull().default(0),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  dailyDate: varchar("dailyDate", { length: 10 }),
+  id: uuid("id").primaryKey().notNull().defaultRandom(),
+  length: integer("length").notNull(),
+  maxGuesses: integer("maxGuesses").notNull(),
+  mode: varchar("mode", { enum: ["free", "daily"] }).notNull(),
+  normalizedWord: varchar("normalizedWord", { length: 32 }).notNull(),
+  score: real("score").notNull().default(0),
+  status: varchar("status", { enum: ["active", "won", "lost"] })
+    .notNull()
+    .default("active"),
+  userId: uuid("userId")
+    .notNull()
+    .references(() => user.id),
+  word: varchar("word", { length: 32 }).notNull(),
+});
+
+export type WordGame = InferSelectModel<typeof wordGame>;
+
+export const wordGameGuess = pgTable("WordGameGuess", {
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
+  feedback: json("feedback").notNull(),
+  gameId: uuid("gameId")
+    .notNull()
+    .references(() => wordGame.id),
+  guess: varchar("guess", { length: 32 }).notNull(),
+  id: uuid("id").primaryKey().notNull().defaultRandom(),
+  normalizedGuess: varchar("normalizedGuess", { length: 32 }).notNull(),
+  position: integer("position").notNull(),
+});
+
+export type WordGameGuess = InferSelectModel<typeof wordGameGuess>;

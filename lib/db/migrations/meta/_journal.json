@@ -15,6 +15,13 @@
       "when": 1783875482021,
       "tag": "0001_conscious_arachne",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784131200000,
+      "tag": "0002_word_game",
+      "breakpoints": true
     }
   ]
 }
