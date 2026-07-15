@@ -44,7 +44,12 @@ import { checkIpRateLimit } from "@/lib/ratelimit";
 import { buildSystemPrompt } from "@/lib/system-prompt";
 import { createTools } from "@/lib/tools";
 import type { ChatMessage, WaitingStatusData } from "@/lib/types";
-import { convertToUIMessages, generateUUID } from "@/lib/utils";
+import {
+  convertToUIMessages,
+  generateUUID,
+  getTextFromMessage,
+} from "@/lib/utils";
+import { deepSearch, searchWeb } from "@/lib/web-search";
 import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
@@ -68,6 +73,42 @@ function getStreamContext() {
 }
 
 export { getStreamContext };
+
+function getSearchQuery(message?: ChatMessage) {
+  const text = message ? getTextFromMessage(message).trim() : "";
+  return text.slice(0, 500);
+}
+
+function formatServerSearchContext(
+  mode: "search" | "deep",
+  search:
+    | Awaited<ReturnType<typeof searchWeb>>
+    | Awaited<ReturnType<typeof deepSearch>>
+) {
+  if (!search.configured) {
+    return `\n\nServer-side ${mode} was requested but is not configured: ${search.message ?? "No search provider is configured."}`;
+  }
+
+  if (search.results.length === 0) {
+    return `\n\nServer-side ${mode} was requested but returned no sources.${search.message ? ` Message: ${search.message}` : ""}`;
+  }
+
+  const sources = search.results
+    .map(
+      (result, index) =>
+        `${index + 1}. ${result.title}\nURL: ${result.url}\nSnippet: ${result.snippet}`
+    )
+    .join("\n\n");
+
+  return [
+    `\n\nServer-side ${mode} results are already available for this turn.`,
+    `Provider: ${search.provider ?? "unknown"}`,
+    "Use these sources before relying on model memory. Cite the relevant URLs in the answer.",
+    "Sources:",
+    sources,
+    "Do not say web search is unavailable when server-side results are provided above.",
+  ].join("\n");
+}
 
 export async function POST(request: Request) {
   let requestBody: PostRequestBody;
@@ -269,11 +310,34 @@ export async function POST(request: Request) {
           request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ??
           "";
 
+        const searchQuery = getSearchQuery(message as ChatMessage | undefined);
+        let serverSearchContext = "";
+
+        if (searchQuery && searchMode === "search") {
+          writeWaitingStatus("waiting", "Searching...");
+          const search = await searchWeb(searchQuery);
+          console.info("[search] server-side search", {
+            configured: search.configured,
+            provider: search.provider,
+            results: search.results.length,
+          });
+          serverSearchContext = formatServerSearchContext("search", search);
+        } else if (searchQuery && searchMode === "deep") {
+          writeWaitingStatus("waiting", "Deep searching...");
+          const search = await deepSearch(searchQuery);
+          console.info("[search] server-side deep search", {
+            configured: search.configured,
+            provider: search.provider,
+            results: search.results.length,
+          });
+          serverSearchContext = formatServerSearchContext("deep", search);
+        }
+
         const searchInstructions =
           searchMode === "search"
-            ? "\n\nSearch mode is enabled for this turn. Before answering, call searchWeb with a focused query and base the answer on the search results. If searchWeb is not configured or returns no useful result, say that clearly."
+            ? "\n\nSearch mode is enabled for this turn. The server may have already injected source-backed search results below. If server-side results are present, answer from them and cite URLs. If no server-side results are present, call searchWeb with a focused query before answering. If search is not configured or returns no useful result, say that clearly."
             : searchMode === "deep"
-              ? "\n\nDeep search mode is enabled for this turn. Before answering, call deepSearch with the user's research question. Base the answer on the deepSearch summary and sources. If deepSearch is not configured or returns no useful result, say that clearly."
+              ? "\n\nDeep search mode is enabled for this turn. The server may have already injected source-backed deep search results below. If server-side results are present, answer from them and cite URLs. If no server-side results are present, call deepSearch with the user's research question before answering. If deepSearch is not configured or returns no useful result, say that clearly."
               : "";
 
         const result = streamText({
@@ -294,7 +358,7 @@ export async function POST(request: Request) {
                   "updateDocument",
                   "requestSuggestions",
                 ],
-          instructions: `${buildSystemPrompt()}${searchInstructions}`,
+          instructions: `${buildSystemPrompt()}${searchInstructions}${serverSearchContext}`,
           messages: modelMessages,
           model: getLanguageModel(chatModel),
           onAbort() {
