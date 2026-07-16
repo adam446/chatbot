@@ -90,7 +90,7 @@ function formatServerSearchContext(
   search:
     | Awaited<ReturnType<typeof searchWeb>>
     | Awaited<ReturnType<typeof deepSearch>>,
-  verifiedAnswer: string | null
+  verifiedAnswer: { fallbackText: string; promptHint: string } | null
 ) {
   if (!search.configured) {
     return `\n\nServer-side ${mode} was requested but is not configured: ${search.message ?? "No search provider is configured."}`;
@@ -111,7 +111,7 @@ function formatServerSearchContext(
     `\n\nServer-side ${mode} results are already available for this turn.`,
     `Provider: ${search.provider ?? "unknown"}`,
     verifiedAnswer
-      ? `Verified answer hint:\n${verifiedAnswer}`
+      ? `Verified answer hint:\n${verifiedAnswer.promptHint}`
       : "No deterministic verified answer was extracted; synthesize from the ranked sources below.",
     "Use these ranked sources before relying on model memory. The first source is the highest-priority source after server-side ranking.",
     "If sources conflict, prefer official government or primary-source domains over Wikipedia, social media, or older secondary summaries.",
@@ -121,18 +121,6 @@ function formatServerSearchContext(
     sources,
     "Do not say web search is unavailable when server-side results are provided above.",
   ].join("\n");
-}
-
-function getFallbackAnswerFromVerifiedSearchAnswer(
-  verifiedAnswer: string | null
-) {
-  return (
-    verifiedAnswer
-      ?.match(
-        /Réponse de secours si le modèle ne génère aucun texte:\s*([\s\S]*)/i
-      )?.[1]
-      ?.trim() ?? null
-  );
 }
 
 function writeAssistantTextFallback({
@@ -371,8 +359,7 @@ export async function POST(request: Request) {
             query: searchQuery,
             results: search.results,
           });
-          fallbackVerifiedAnswer =
-            getFallbackAnswerFromVerifiedSearchAnswer(verifiedAnswer);
+          fallbackVerifiedAnswer = verifiedAnswer?.fallbackText ?? null;
           console.log("[search] server-side search", {
             automaticSearchMode,
             configured: search.configured,
@@ -393,8 +380,7 @@ export async function POST(request: Request) {
             query: searchQuery,
             results: search.results,
           });
-          fallbackVerifiedAnswer =
-            getFallbackAnswerFromVerifiedSearchAnswer(verifiedAnswer);
+          fallbackVerifiedAnswer = verifiedAnswer?.fallbackText ?? null;
           console.log("[search] server-side deep search", {
             automaticSearchMode,
             configured: search.configured,
@@ -453,6 +439,12 @@ export async function POST(request: Request) {
           },
           onEnd() {
             stopWaitingStatus();
+            if (fallbackVerifiedAnswer && !hasAssistantText) {
+              writeAssistantTextFallback({
+                dataStream,
+                text: fallbackVerifiedAnswer,
+              });
+            }
           },
           onError() {
             stopWaitingStatus();
@@ -492,30 +484,10 @@ export async function POST(request: Request) {
           },
         });
 
-        const streamWithSearchFallback = result.stream.pipeThrough(
-          new TransformStream({
-            transform(chunk, controller) {
-              if (
-                chunk.type === "finish" &&
-                fallbackVerifiedAnswer &&
-                !hasAssistantText
-              ) {
-                writeAssistantTextFallback({
-                  dataStream,
-                  text: fallbackVerifiedAnswer,
-                });
-                hasAssistantText = true;
-                stopWaitingStatus();
-              }
-              controller.enqueue(chunk);
-            },
-          })
-        );
-
         dataStream.merge(
           toUIMessageStream({
             sendReasoning: isReasoningModel,
-            stream: streamWithSearchFallback,
+            stream: result.stream,
           })
         );
 

@@ -151,35 +151,41 @@ export function buildVerifiedSearchAnswer({
 }: {
   query: string;
   results: WebSearchResult[];
-}) {
+}): { fallbackText: string; promptHint: string } | null {
   const normalizedQuery = query.toLowerCase();
   const asksCanadaPrimeMinister =
     /\b(canada|canadien|canadienne)\b/.test(normalizedQuery) &&
     /\b(prime minister|premier ministre)\b/.test(normalizedQuery);
 
-  if (!asksCanadaPrimeMinister) {
-    return null;
-  }
-
   const officialResult = results.find(getOfficialSource);
-  if (!officialResult) {
+  const bestResult = officialResult ?? results[0];
+  if (!bestResult) {
     return null;
   }
 
-  const name = extractCanadaPrimeMinisterName(
-    `${officialResult.title} ${officialResult.snippet}`
-  );
-  if (!name) {
-    return null;
+  if (asksCanadaPrimeMinister) {
+    const name = extractCanadaPrimeMinisterName(
+      `${bestResult.title} ${bestResult.snippet}`
+    );
+    if (name) {
+      return {
+        fallbackText: `Le premier ministre actuel du Canada est **${name}**.\n\nSource: [${bestResult.title}](${bestResult.url})`,
+        promptHint: [
+          `Verified answer from the highest-priority official source: ${name} is the current Prime Minister of Canada.`,
+          `Answer in the user's language and cite this source: ${bestResult.title} (${bestResult.url}).`,
+        ].join("\n"),
+      };
+    }
   }
 
-  return [
-    `Verified answer from the highest-priority official source: ${name} is the current Prime Minister of Canada.`,
-    `Answer in the user's language and cite this source: ${officialResult.title} (${officialResult.url}).`,
-    "",
-    `Réponse de secours si le modèle ne génère aucun texte: Le premier ministre actuel du Canada est **${name}**.`,
-    `Source: [${officialResult.title}](${officialResult.url})`,
-  ].join("\n");
+  return {
+    fallbackText: `D'après la source la mieux classée: ${bestResult.snippet}\n\nSource: [${bestResult.title}](${bestResult.url})`,
+    promptHint: [
+      "A source-backed answer is already available.",
+      `Use the best-ranked source below to answer directly in the user's language and cite its URL.`,
+      `Source: ${bestResult.title} (${bestResult.url})`,
+    ].join("\n"),
+  };
 }
 
 function cleanResults(results: WebSearchResult[]) {
