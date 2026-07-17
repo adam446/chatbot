@@ -1,8 +1,13 @@
 import { z } from "zod";
 
 const DEFAULT_IMAGE_MODEL = "black-forest-labs/flux.1-dev";
+const DEFAULT_IMAGE_EDIT_MODEL = "black-forest-labs/flux.1-kontext-dev";
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 1024;
+const DEFAULT_CFG_SCALE = 5;
+const DEFAULT_IMAGE_TIMEOUT_MS = 60_000;
+const DEFAULT_SEED = 0;
+const DEFAULT_STEPS = 20;
 
 type NvidiaImageRequest = {
   prompt: string;
@@ -16,6 +21,10 @@ function getImageModel() {
   return process.env.NVIDIA_IMAGE_MODEL ?? DEFAULT_IMAGE_MODEL;
 }
 
+function getImageEditModel() {
+  return process.env.NVIDIA_IMAGE_EDIT_MODEL ?? DEFAULT_IMAGE_EDIT_MODEL;
+}
+
 function getImageApiUrl(hasSourceImage: boolean) {
   if (hasSourceImage && process.env.NVIDIA_IMAGE_EDIT_API_URL) {
     return process.env.NVIDIA_IMAGE_EDIT_API_URL;
@@ -25,7 +34,9 @@ function getImageApiUrl(hasSourceImage: boolean) {
     return process.env.NVIDIA_IMAGE_API_URL;
   }
 
-  return `https://ai.api.nvidia.com/v1/genai/${getImageModel()}`;
+  const model = hasSourceImage ? getImageEditModel() : getImageModel();
+
+  return `https://ai.api.nvidia.com/v1/genai/${model}`;
 }
 
 function getNumberEnv(name: string, fallback: number) {
@@ -98,22 +109,30 @@ function buildPayload({
   sourceImageMimeType,
 }: NvidiaImageRequest) {
   const payload: Record<string, unknown> = {
+    cfg_scale: getNumberEnv("NVIDIA_IMAGE_CFG_SCALE", DEFAULT_CFG_SCALE),
     height: getNumberEnv("NVIDIA_IMAGE_HEIGHT", DEFAULT_HEIGHT),
     prompt,
+    samples: 1,
+    seed: getNumberEnv("NVIDIA_IMAGE_SEED", DEFAULT_SEED),
+    steps: getNumberEnv("NVIDIA_IMAGE_STEPS", DEFAULT_STEPS),
     width: getNumberEnv("NVIDIA_IMAGE_WIDTH", DEFAULT_WIDTH),
   };
 
   if (process.env.NVIDIA_IMAGE_INCLUDE_MODEL === "1") {
-    payload.model = getImageModel();
+    payload.model = sourceImageBase64 ? getImageEditModel() : getImageModel();
   }
 
   if (sourceImageBase64) {
-    payload.mode = "image-to-image";
-    payload.image = sourceImageBase64;
-    payload.image_type = sourceImageMimeType ?? "image/png";
+    payload.image = `data:${sourceImageMimeType ?? "image/png"};base64,${sourceImageBase64}`;
+  } else {
+    payload.mode = "base";
   }
 
   return payload;
+}
+
+function getImageTimeoutMs() {
+  return getNumberEnv("NVIDIA_IMAGE_TIMEOUT_MS", DEFAULT_IMAGE_TIMEOUT_MS);
 }
 
 export async function fetchImageAsBase64(url: string) {
@@ -154,6 +173,7 @@ export async function generateNvidiaImage({
       "Content-Type": "application/json",
     },
     method: "POST",
+    signal: AbortSignal.timeout(getImageTimeoutMs()),
   });
 
   if (!response.ok) {
