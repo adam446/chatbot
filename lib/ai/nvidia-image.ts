@@ -136,55 +136,98 @@ function getImageTimeoutMs() {
   return getNumberEnv("NVIDIA_IMAGE_TIMEOUT_MS", DEFAULT_IMAGE_TIMEOUT_MS);
 }
 
-export async function fetchImageAsBase64(url: string) {
-  const parsedUrl = new URL(url, "http://localhost");
-  const blobPathname =
-    parsedUrl.pathname.endsWith("/api/files/view") &&
-    parsedUrl.searchParams.get("pathname");
-
-  if (blobPathname) {
-    const result = await get(blobPathname, {
-      access: "private",
-      useCache: false,
-    });
-
-    if (result?.statusCode !== 200) {
-      throw new Error("Could not fetch source image from private Blob store");
-    }
-
-    const { contentType } = result.blob;
-    if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) {
-      throw new Error("Source image must be PNG, JPEG, or WebP");
-    }
-
-    const buffer = Buffer.from(await new Response(result.stream).arrayBuffer());
-
-    return {
-      base64: buffer.toString("base64"),
-      mimeType: contentType,
-    };
+function getPrivateBlobPathnameFromUrl(value: string): string | null {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(value, "http://localhost");
+  } catch {
+    return null;
   }
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Could not fetch source image (${response.status})`);
+  if (parsedUrl.pathname.endsWith("/api/files/view")) {
+    return parsedUrl.searchParams.get("pathname");
   }
 
-  const contentType = response.headers.get("content-type") ?? "";
-  if (
-    !["image/png", "image/jpeg", "image/webp"].includes(
-      contentType.split(";")[0]
-    )
-  ) {
+  const nestedImageUrl =
+    parsedUrl.pathname.endsWith("/_next/image") &&
+    parsedUrl.searchParams.get("url");
+
+  if (nestedImageUrl) {
+    return getPrivateBlobPathnameFromUrl(nestedImageUrl);
+  }
+
+  return null;
+}
+
+async function fetchPrivateBlobImageAsBase64(pathname: string) {
+  const result = await get(pathname, {
+    access: "private",
+    useCache: false,
+  });
+
+  if (result?.statusCode !== 200) {
+    throw new Error("Could not fetch source image from private Blob store");
+  }
+
+  const { contentType } = result.blob;
+  if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) {
     throw new Error("Source image must be PNG, JPEG, or WebP");
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer());
+  const buffer = Buffer.from(await new Response(result.stream).arrayBuffer());
 
   return {
     base64: buffer.toString("base64"),
-    mimeType: contentType.split(";")[0],
+    mimeType: contentType,
   };
+}
+
+export async function fetchImageAsBase64(url: string) {
+  if (url.startsWith("data:image/")) {
+    const mimeType = url
+      .match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,/i)?.[1]
+      ?.replace("image/jpg", "image/jpeg");
+    const base64 = extractImageBase64(url);
+
+    if (!mimeType || !base64) {
+      throw new Error("Source image data URL is invalid");
+    }
+
+    return { base64, mimeType };
+  }
+
+  const blobPathname = getPrivateBlobPathnameFromUrl(url);
+  if (blobPathname) {
+    return fetchPrivateBlobImageAsBase64(blobPathname);
+  }
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Could not fetch source image (${response.status})`);
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (
+      !["image/png", "image/jpeg", "image/webp"].includes(
+        contentType.split(";")[0]
+      )
+    ) {
+      throw new Error("Source image must be PNG, JPEG, or WebP");
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    return {
+      base64: buffer.toString("base64"),
+      mimeType: contentType.split(";")[0],
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "fetch failed";
+    throw new Error(`Could not fetch source image: ${message}`, {
+      cause: error,
+    });
+  }
 }
 
 export async function generateNvidiaImage({
