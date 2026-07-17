@@ -4,11 +4,13 @@ import { z } from "zod";
 
 import { auth } from "@/app/(auth)/auth";
 
+const MAX_BYTES = 4.5 * 1024 * 1024;
+
 const FileSchema = z.object({
   file: z
     .instanceof(Blob)
-    .refine((file) => file.size <= 5 * 1024 * 1024, {
-      message: "File size should be less than 5MB",
+    .refine((file) => file.size <= MAX_BYTES, {
+      message: "File size should be less than 4.5MB",
     })
     .refine(
       (file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type),
@@ -21,7 +23,7 @@ const FileSchema = z.object({
 export async function POST(request: Request) {
   const session = await auth();
 
-  if (!session) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -49,6 +51,7 @@ export async function POST(request: Request) {
 
     const filename = (formData.get("file") as File).name;
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const pathname = `attachments/${session.user.id}/${Date.now()}-${safeName}`;
     const fileBuffer = await file.arrayBuffer();
 
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -59,11 +62,15 @@ export async function POST(request: Request) {
     }
 
     try {
-      const data = await put(`${safeName}`, fileBuffer, {
-        access: "public",
+      const data = await put(pathname, fileBuffer, {
+        access: "private",
+        contentType: file.type,
       });
+      const url = new URL(request.url);
+      url.pathname = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/files/view`;
+      url.search = new URLSearchParams({ pathname: data.pathname }).toString();
 
-      return NextResponse.json(data);
+      return NextResponse.json({ ...data, url: url.toString() });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown Blob upload error";

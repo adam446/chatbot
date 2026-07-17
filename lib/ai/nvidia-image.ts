@@ -1,3 +1,4 @@
+import { get } from "@vercel/blob";
 import { z } from "zod";
 
 const DEFAULT_IMAGE_MODEL = "black-forest-labs/flux.1-dev";
@@ -136,14 +137,46 @@ function getImageTimeoutMs() {
 }
 
 export async function fetchImageAsBase64(url: string) {
+  const parsedUrl = new URL(url, "http://localhost");
+  const blobPathname =
+    parsedUrl.pathname.endsWith("/api/files/view") &&
+    parsedUrl.searchParams.get("pathname");
+
+  if (blobPathname) {
+    const result = await get(blobPathname, {
+      access: "private",
+      useCache: false,
+    });
+
+    if (result?.statusCode !== 200) {
+      throw new Error("Could not fetch source image from private Blob store");
+    }
+
+    const { contentType } = result.blob;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) {
+      throw new Error("Source image must be PNG, JPEG, or WebP");
+    }
+
+    const buffer = Buffer.from(await new Response(result.stream).arrayBuffer());
+
+    return {
+      base64: buffer.toString("base64"),
+      mimeType: contentType,
+    };
+  }
+
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not fetch source image (${response.status})`);
   }
 
   const contentType = response.headers.get("content-type") ?? "";
-  if (!["image/png", "image/jpeg"].includes(contentType.split(";")[0])) {
-    throw new Error("Source image must be PNG or JPEG");
+  if (
+    !["image/png", "image/jpeg", "image/webp"].includes(
+      contentType.split(";")[0]
+    )
+  ) {
+    throw new Error("Source image must be PNG, JPEG, or WebP");
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
