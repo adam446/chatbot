@@ -406,6 +406,26 @@ export async function POST(request: Request) {
 
         let hasAssistantText = false;
 
+        if (fallbackVerifiedAnswer) {
+          stopWaitingStatus();
+          writeAssistantTextFallback({
+            dataStream,
+            text: fallbackVerifiedAnswer,
+          });
+
+          if (titlePromise) {
+            try {
+              const title = await titlePromise;
+              dataStream.write({ data: title, type: "data-chat-title" });
+              updateChatTitleById({ chatId: id, title });
+            } catch {
+              /* non-fatal */
+            }
+          }
+
+          return;
+        }
+
         const result = streamText({
           activeTools:
             isReasoningModel && !supportsTools
