@@ -5,9 +5,9 @@ const DEFAULT_IMAGE_EDIT_MODEL = "black-forest-labs/flux.1-kontext-dev";
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 1024;
 const DEFAULT_CFG_SCALE = 5;
-const DEFAULT_IMAGE_TIMEOUT_MS = 60_000;
+const DEFAULT_IMAGE_TIMEOUT_MS = 45_000;
 const DEFAULT_SEED = 0;
-const DEFAULT_STEPS = 20;
+const DEFAULT_STEPS = 8;
 
 type NvidiaImageRequest = {
   prompt: string;
@@ -163,18 +163,30 @@ export async function generateNvidiaImage({
     throw new Error("NVIDIA_API_KEY is required for image generation");
   }
 
-  const response = await fetch(getImageApiUrl(Boolean(sourceImageBase64)), {
-    body: JSON.stringify(
-      buildPayload({ prompt, sourceImageBase64, sourceImageMimeType })
-    ),
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    method: "POST",
-    signal: AbortSignal.timeout(getImageTimeoutMs()),
-  });
+  let response: Response;
+  try {
+    response = await fetch(getImageApiUrl(Boolean(sourceImageBase64)), {
+      body: JSON.stringify(
+        buildPayload({ prompt, sourceImageBase64, sourceImageMimeType })
+      ),
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      signal: AbortSignal.timeout(getImageTimeoutMs()),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(
+        `NVIDIA image request timed out after ${getImageTimeoutMs()}ms`,
+        { cause: error }
+      );
+    }
+
+    throw error;
+  }
 
   if (!response.ok) {
     const details = await response.text().catch(() => "");
