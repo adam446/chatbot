@@ -13,7 +13,7 @@ import {
   wordGameGuess,
 } from "@/lib/db/schema";
 
-const client = postgres(process.env.POSTGRES_URL ?? "");
+const client = postgres(process.env.POSTGRES_URL ?? "", { ssl: "require" });
 const db = drizzle(client);
 
 export type GameMode = "free" | "daily";

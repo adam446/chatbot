@@ -1,5 +1,6 @@
 import { ipAddress } from "@vercel/functions";
 import {
+  consumeStream,
   convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
@@ -560,22 +561,24 @@ export async function POST(request: Request) {
 
     return createUIMessageStreamResponse({
       async consumeSseStream({ stream: sseStream }) {
-        if (!process.env.REDIS_URL) {
-          return;
-        }
-        try {
-          const streamContext = getStreamContext();
-          if (streamContext) {
-            const streamId = generateId();
-            await createStreamId({ chatId: id, streamId });
-            await streamContext.createNewResumableStream(
-              streamId,
-              () => sseStream
-            );
+        if (process.env.REDIS_URL) {
+          try {
+            const streamContext = getStreamContext();
+            if (streamContext) {
+              const streamId = generateId();
+              await createStreamId({ chatId: id, streamId });
+              await streamContext.createNewResumableStream(
+                streamId,
+                () => sseStream
+              );
+              return;
+            }
+          } catch {
+            /* non-critical */
           }
-        } catch {
-          /* non-critical */
         }
+
+        await consumeStream({ stream: sseStream });
       },
       headers: {
         "x-chat-automatic-search-mode": automaticSearchMode,

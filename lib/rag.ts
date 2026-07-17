@@ -4,7 +4,7 @@ import { voyage } from "@ai-sdk/voyage";
 import { embed, embedMany } from "ai";
 import postgres from "postgres";
 
-const client = postgres(process.env.POSTGRES_URL ?? "");
+const client = postgres(process.env.POSTGRES_URL ?? "", { ssl: "require" });
 
 const embeddingModel = voyage.textEmbeddingModel("voyage-3-lite");
 
@@ -13,7 +13,10 @@ function chunkText(text: string, chunkSize = 400, overlap = 50): string[] {
   const chunks: string[] = [];
 
   for (let i = 0; i < words.length; i += chunkSize - overlap) {
-    const chunk = words.slice(i, i + chunkSize).join(" ").trim();
+    const chunk = words
+      .slice(i, i + chunkSize)
+      .join(" ")
+      .trim();
     if (chunk.length > 0) {
       chunks.push(chunk);
     }
@@ -46,13 +49,15 @@ export async function ingestDocument({
     values: chunks,
   });
 
-  for (let i = 0; i < chunks.length; i++) {
-    const vectorStr = `[${embeddings[i].join(",")}]`;
-    await client`
-      INSERT INTO "DocumentChunk" ("fileName", "blobUrl", "content", "embedding", "userId")
-      VALUES (${fileName}, ${blobUrl}, ${chunks[i]}, ${vectorStr}::vector, ${userId}::uuid)
-    `;
-  }
+  await Promise.all(
+    chunks.map(async (chunk, i) => {
+      const vectorStr = `[${embeddings[i].join(",")}]`;
+      await client`
+        INSERT INTO "DocumentChunk" ("fileName", "blobUrl", "content", "embedding", "userId")
+        VALUES (${fileName}, ${blobUrl}, ${chunk}, ${vectorStr}::vector, ${userId}::uuid)
+      `;
+    })
+  );
 
   return { chunks: chunks.length };
 }
