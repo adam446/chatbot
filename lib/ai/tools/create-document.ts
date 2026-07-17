@@ -13,12 +13,14 @@ type CreateDocumentProps = {
   session: Session;
   dataStream: UIMessageStreamWriter<ChatMessage>;
   modelId: string;
+  sourceImageUrls?: string[];
 };
 
 export const createDocument = ({
   session,
   dataStream,
   modelId,
+  sourceImageUrls = [],
 }: CreateDocumentProps) =>
   tool({
     description:
@@ -65,7 +67,10 @@ export const createDocument = ({
           id,
           modelId,
           session,
-          sourceImageUrl,
+          sourceImageUrl:
+            kind === "image"
+              ? (sourceImageUrls.at(-1) ?? sourceImageUrl)
+              : undefined,
           title,
         });
       } catch (error) {
