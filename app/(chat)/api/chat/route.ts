@@ -355,6 +355,24 @@ export async function POST(request: Request) {
         userId: session.user.id,
       })
     );
+    const currentImageAttachmentUrls =
+      message?.parts
+        .filter(
+          (
+            part
+          ): part is typeof part & {
+            mediaType: string;
+            type: "file";
+            url: string;
+          } =>
+            part.type === "file" &&
+            "mediaType" in part &&
+            typeof part.mediaType === "string" &&
+            part.mediaType.startsWith("image/") &&
+            "url" in part &&
+            typeof part.url === "string"
+        )
+        .map((part) => part.url) ?? [];
     const searchQuery = getSearchQuery(message as ChatMessage | undefined);
     const automaticSearchMode = getAutomaticSearchMode(searchQuery);
     const effectiveSearchMode =
@@ -576,6 +594,7 @@ export async function POST(request: Request) {
               dataStream,
               modelId: chatModel,
               session,
+              sourceImageUrls: currentImageAttachmentUrls,
             }),
             editDocument: editDocument({ dataStream, session }),
             getWeather,
