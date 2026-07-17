@@ -25,6 +25,7 @@ export const PreviewAttachment = ({
           className="size-full object-cover"
           height={96}
           src={url}
+          unoptimized
           width={96}
         />
       ) : (

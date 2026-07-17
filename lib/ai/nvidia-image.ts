@@ -1,8 +1,14 @@
+import { get } from "@vercel/blob";
 import { z } from "zod";
 
 const DEFAULT_IMAGE_MODEL = "black-forest-labs/flux.1-dev";
+const DEFAULT_IMAGE_EDIT_MODEL = "black-forest-labs/flux.1-kontext-dev";
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 1024;
+const DEFAULT_CFG_SCALE = 5;
+const DEFAULT_IMAGE_TIMEOUT_MS = 45_000;
+const DEFAULT_SEED = 0;
+const DEFAULT_STEPS = 8;
 
 type NvidiaImageRequest = {
   prompt: string;
@@ -16,6 +22,10 @@ function getImageModel() {
   return process.env.NVIDIA_IMAGE_MODEL ?? DEFAULT_IMAGE_MODEL;
 }
 
+function getImageEditModel() {
+  return process.env.NVIDIA_IMAGE_EDIT_MODEL ?? DEFAULT_IMAGE_EDIT_MODEL;
+}
+
 function getImageApiUrl(hasSourceImage: boolean) {
   if (hasSourceImage && process.env.NVIDIA_IMAGE_EDIT_API_URL) {
     return process.env.NVIDIA_IMAGE_EDIT_API_URL;
@@ -25,7 +35,9 @@ function getImageApiUrl(hasSourceImage: boolean) {
     return process.env.NVIDIA_IMAGE_API_URL;
   }
 
-  return `https://ai.api.nvidia.com/v1/genai/${getImageModel()}`;
+  const model = hasSourceImage ? getImageEditModel() : getImageModel();
+
+  return `https://ai.api.nvidia.com/v1/genai/${model}`;
 }
 
 function getNumberEnv(name: string, fallback: number) {
@@ -98,33 +110,73 @@ function buildPayload({
   sourceImageMimeType,
 }: NvidiaImageRequest) {
   const payload: Record<string, unknown> = {
+    cfg_scale: getNumberEnv("NVIDIA_IMAGE_CFG_SCALE", DEFAULT_CFG_SCALE),
     height: getNumberEnv("NVIDIA_IMAGE_HEIGHT", DEFAULT_HEIGHT),
     prompt,
+    samples: 1,
+    seed: getNumberEnv("NVIDIA_IMAGE_SEED", DEFAULT_SEED),
+    steps: getNumberEnv("NVIDIA_IMAGE_STEPS", DEFAULT_STEPS),
     width: getNumberEnv("NVIDIA_IMAGE_WIDTH", DEFAULT_WIDTH),
   };
 
   if (process.env.NVIDIA_IMAGE_INCLUDE_MODEL === "1") {
-    payload.model = getImageModel();
+    payload.model = sourceImageBase64 ? getImageEditModel() : getImageModel();
   }
 
   if (sourceImageBase64) {
-    payload.mode = "image-to-image";
-    payload.image = sourceImageBase64;
-    payload.image_type = sourceImageMimeType ?? "image/png";
+    payload.image = `data:${sourceImageMimeType ?? "image/png"};base64,${sourceImageBase64}`;
+  } else {
+    payload.mode = "base";
   }
 
   return payload;
 }
 
+function getImageTimeoutMs() {
+  return getNumberEnv("NVIDIA_IMAGE_TIMEOUT_MS", DEFAULT_IMAGE_TIMEOUT_MS);
+}
+
 export async function fetchImageAsBase64(url: string) {
+  const parsedUrl = new URL(url, "http://localhost");
+  const blobPathname =
+    parsedUrl.pathname.endsWith("/api/files/view") &&
+    parsedUrl.searchParams.get("pathname");
+
+  if (blobPathname) {
+    const result = await get(blobPathname, {
+      access: "private",
+      useCache: false,
+    });
+
+    if (result?.statusCode !== 200) {
+      throw new Error("Could not fetch source image from private Blob store");
+    }
+
+    const { contentType } = result.blob;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) {
+      throw new Error("Source image must be PNG, JPEG, or WebP");
+    }
+
+    const buffer = Buffer.from(await new Response(result.stream).arrayBuffer());
+
+    return {
+      base64: buffer.toString("base64"),
+      mimeType: contentType,
+    };
+  }
+
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Could not fetch source image (${response.status})`);
   }
 
   const contentType = response.headers.get("content-type") ?? "";
-  if (!["image/png", "image/jpeg"].includes(contentType.split(";")[0])) {
-    throw new Error("Source image must be PNG or JPEG");
+  if (
+    !["image/png", "image/jpeg", "image/webp"].includes(
+      contentType.split(";")[0]
+    )
+  ) {
+    throw new Error("Source image must be PNG, JPEG, or WebP");
   }
 
   const buffer = Buffer.from(await response.arrayBuffer());
@@ -144,17 +196,30 @@ export async function generateNvidiaImage({
     throw new Error("NVIDIA_API_KEY is required for image generation");
   }
 
-  const response = await fetch(getImageApiUrl(Boolean(sourceImageBase64)), {
-    body: JSON.stringify(
-      buildPayload({ prompt, sourceImageBase64, sourceImageMimeType })
-    ),
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    method: "POST",
-  });
+  let response: Response;
+  try {
+    response = await fetch(getImageApiUrl(Boolean(sourceImageBase64)), {
+      body: JSON.stringify(
+        buildPayload({ prompt, sourceImageBase64, sourceImageMimeType })
+      ),
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      signal: AbortSignal.timeout(getImageTimeoutMs()),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(
+        `NVIDIA image request timed out after ${getImageTimeoutMs()}ms`,
+        { cause: error }
+      );
+    }
+
+    throw error;
+  }
 
   if (!response.ok) {
     const details = await response.text().catch(() => "");
