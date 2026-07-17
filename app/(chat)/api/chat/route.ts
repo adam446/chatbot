@@ -1,3 +1,4 @@
+import { get } from "@vercel/blob";
 import { ipAddress } from "@vercel/functions";
 import {
   consumeStream,
@@ -80,6 +81,87 @@ function getStreamContext() {
 }
 
 export { getStreamContext };
+
+type ChatMessagePart = ChatMessage["parts"][number];
+
+function getPrivateBlobPathname(url: string) {
+  try {
+    const parsedUrl = new URL(url, "http://localhost");
+    if (!parsedUrl.pathname.endsWith("/api/files/view")) {
+      return null;
+    }
+
+    return parsedUrl.searchParams.get("pathname");
+  } catch {
+    return null;
+  }
+}
+
+function isFilePart(part: ChatMessagePart): part is ChatMessagePart & {
+  mediaType: string;
+  type: "file";
+  url: string;
+} {
+  return (
+    part.type === "file" &&
+    "url" in part &&
+    typeof part.url === "string" &&
+    "mediaType" in part &&
+    typeof part.mediaType === "string"
+  );
+}
+
+async function hydratePrivateAttachmentPart({
+  part,
+  userId,
+}: {
+  part: ChatMessagePart;
+  userId: string;
+}): Promise<ChatMessagePart> {
+  if (!isFilePart(part) || !part.mediaType.startsWith("image/")) {
+    return part;
+  }
+
+  const pathname = getPrivateBlobPathname(part.url);
+  if (!pathname) {
+    return part;
+  }
+
+  if (!pathname.startsWith(`attachments/${userId}/`)) {
+    return part;
+  }
+
+  const result = await get(pathname, { access: "private", useCache: false });
+  if (result?.statusCode !== 200) {
+    return part;
+  }
+
+  const contentType = result.blob.contentType || part.mediaType;
+  const buffer = Buffer.from(await new Response(result.stream).arrayBuffer());
+
+  return {
+    ...part,
+    mediaType: contentType,
+    url: `data:${contentType};base64,${buffer.toString("base64")}`,
+  };
+}
+
+function hydratePrivateAttachmentsForModel({
+  messages,
+  userId,
+}: {
+  messages: ChatMessage[];
+  userId: string;
+}) {
+  return Promise.all(
+    messages.map(async (msg) => ({
+      ...msg,
+      parts: await Promise.all(
+        msg.parts.map((part) => hydratePrivateAttachmentPart({ part, userId }))
+      ),
+    }))
+  );
+}
 
 function getSearchQuery(message?: ChatMessage) {
   const text = message ? getTextFromMessage(message).trim() : "";
@@ -267,7 +349,12 @@ export async function POST(request: Request) {
     const isReasoningModel = capabilities?.reasoning === true;
     const supportsTools = capabilities?.tools === true;
 
-    const modelMessages = await convertToModelMessages(uiMessages);
+    const modelMessages = await convertToModelMessages(
+      await hydratePrivateAttachmentsForModel({
+        messages: uiMessages,
+        userId: session.user.id,
+      })
+    );
     const searchQuery = getSearchQuery(message as ChatMessage | undefined);
     const automaticSearchMode = getAutomaticSearchMode(searchQuery);
     const effectiveSearchMode =
