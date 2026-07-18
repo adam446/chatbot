@@ -16,7 +16,15 @@ function getModelName(modelId: string) {
 
 export const imageDocumentHandler = createDocumentHandler<"image">({
   kind: "image",
-  onCreateDocument: async ({ title, dataStream, modelId, sourceImageUrl }) => {
+  onCreateDocument: async ({
+    title,
+    prompt,
+    dataStream,
+    modelId,
+    sourceImageUrl,
+  }) => {
+    const imagePrompt = prompt ?? title;
+
     dataStream.write({
       data: {
         message: "Checking image safety...",
@@ -30,7 +38,7 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
 
     const safety = await evaluateImageSafety({
       mode: sourceImageUrl ? "edit" : "create",
-      prompt: title,
+      prompt: imagePrompt,
       sourceImagePresent: Boolean(sourceImageUrl),
     });
 
@@ -78,7 +86,7 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     });
 
     const image = await generateNvidiaImage({
-      prompt: title,
+      prompt: imagePrompt,
       sourceImageBase64: sendSourceImage ? sourceImage?.base64 : undefined,
       sourceImageMimeType: sendSourceImage ? sourceImage?.mimeType : undefined,
     });

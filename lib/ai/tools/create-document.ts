@@ -14,6 +14,7 @@ type CreateDocumentProps = {
   dataStream: UIMessageStreamWriter<ChatMessage>;
   modelId: string;
   sourceImageUrls?: string[];
+  sourceImagePrompt?: string;
 };
 
 export const createDocument = ({
@@ -21,11 +22,12 @@ export const createDocument = ({
   dataStream,
   modelId,
   sourceImageUrls = [],
+  sourceImagePrompt,
 }: CreateDocumentProps) =>
   tool({
     description:
       "Create an artifact. You MUST specify kind: use 'code' for any programming/algorithm request (creates a script), 'text' for essays/writing (creates a document), 'sheet' for spreadsheets/data, 'image' for image generation or editing from an uploaded image. Image requests always run server-side NVIDIA safety before generation.",
-    execute: async ({ title, kind, sourceImageUrl }) => {
+    execute: async ({ title, kind, prompt, sourceImageUrl }) => {
       const id = generateUUID();
 
       dataStream.write({
@@ -66,6 +68,7 @@ export const createDocument = ({
           dataStream,
           id,
           modelId,
+          prompt: kind === "image" ? (prompt ?? sourceImagePrompt) : undefined,
           session,
           sourceImageUrl:
             kind === "image"
@@ -122,6 +125,13 @@ export const createDocument = ({
         .enum(artifactKinds)
         .describe(
           "REQUIRED. 'code' for programming/algorithms, 'text' for essays/writing, 'sheet' for spreadsheets, 'image' for image generation or image editing"
+        ),
+      prompt: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "For image artifacts, the full generation/edit instruction. Use the user's exact requested transformation, including constraints like preserving identity, face, pose, background, style, and original colors."
         ),
       sourceImageUrl: z
         .string()

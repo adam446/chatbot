@@ -591,7 +591,7 @@ export async function POST(request: Request) {
               ? "\n\nDeep search mode is enabled for this turn. The server may have already injected source-backed deep search results below. If server-side results are present, answer from them and cite URLs. If no server-side results are present, call deepSearch with the user's research question before answering. If deepSearch is not configured or returns no useful result, say that clearly."
               : "";
         const imageToolInstructions = shouldUseImageToolPlanning
-          ? '\n\nThe current user message includes an uploaded image and asks to create or modify an image. You MUST call createDocument exactly once with kind "image". Use the user\'s requested transformation as the title. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
+          ? '\n\nThe current user message includes an uploaded image and asks to create or modify an image. You MUST call createDocument exactly once with kind "image". Use a short display title, and put the user\'s complete requested transformation in the prompt field. The prompt must explicitly preserve the source image subject identity, face, pose, framing, background, line art/style, and original colors unless the user asked to change them. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
           : "";
 
         let hasAssistantText = false;
@@ -681,6 +681,9 @@ export async function POST(request: Request) {
               dataStream,
               modelId: chatModel,
               session,
+              sourceImagePrompt: shouldUseImageToolPlanning
+                ? searchQuery
+                : undefined,
               sourceImageUrls: currentImageAttachmentUrls,
             }),
             editDocument: editDocument({ dataStream, session }),

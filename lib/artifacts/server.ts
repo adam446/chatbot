@@ -20,6 +20,7 @@ export type SaveDocumentProps = {
 export type CreateDocumentCallbackProps = {
   id: string;
   title: string;
+  prompt?: string;
   dataStream: UIMessageStreamWriter<ChatMessage>;
   session: Session;
   modelId: string;
@@ -52,6 +53,7 @@ export function createDocumentHandler<T extends ArtifactKind>(config: {
         dataStream: args.dataStream,
         id: args.id,
         modelId: args.modelId,
+        prompt: args.prompt,
         session: args.session,
         sourceImageUrl: args.sourceImageUrl,
         title: args.title,
