@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { postRequestBodySchema } from "@/app/(chat)/api/chat/schema";
 import { getAutomaticSearchMode } from "@/lib/search-mode";
-import { rankSearchResultsForAnswer } from "@/lib/web-search";
+import { deepSearch, rankSearchResultsForAnswer } from "@/lib/web-search";
 
 test.describe("Search mode detection", () => {
   test("detects freshness-sensitive prompts", () => {
@@ -74,6 +74,37 @@ test.describe("Search mode detection", () => {
     ]);
 
     expect(ranked[0].url).toBe("https://www.pm.gc.ca/en/about");
+  });
+
+  test("deep search keeps multiple angles when providers are unavailable", async () => {
+    const envNames = [
+      "NVIDIA_API_KEY",
+      "NVIDIA_SEARCH_API_URL",
+      "NVIDIA_SEARCH_API_KEY",
+      "TAVILY_API_KEY",
+      "BRAVE_SEARCH_API_KEY",
+    ] as const;
+    const previous = new Map(envNames.map((name) => [name, process.env[name]]));
+
+    try {
+      for (const name of envNames) {
+        delete process.env[name];
+      }
+
+      const result = await deepSearch("test research question");
+      expect(result.configured).toBe(false);
+      expect(result.plannedQueries.length).toBeGreaterThanOrEqual(5);
+      expect(result.report).toBeNull();
+    } finally {
+      for (const name of envNames) {
+        const value = previous.get(name);
+        if (value === undefined) {
+          delete process.env[name];
+        } else {
+          process.env[name] = value;
+        }
+      }
+    }
   });
 });
 

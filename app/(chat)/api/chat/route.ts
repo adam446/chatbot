@@ -61,8 +61,6 @@ import {
 import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
-export const maxDuration = 60;
-
 const HEALTH_CHECK_DELAY_MS = 9000;
 const BOTID_ENABLED = process.env.NEXT_PUBLIC_BOTID_ENABLED === "1";
 const MODEL_IMAGE_CONTENT_TYPES = new Set([
@@ -516,12 +514,26 @@ function formatServerSearchContext(
     )
     .join("\n\n");
 
+  const report =
+    "report" in search && search.report
+      ? [
+          "Server-side research report:",
+          `Conclusion: ${search.report.conclusion}`,
+          `Key findings: ${search.report.keyFindings.join(" | ") || "None"}`,
+          `Disagreements: ${search.report.disagreements.join(" | ") || "None identified"}`,
+          `Limitations: ${search.report.limitations.join(" | ") || "None stated"}`,
+          `Citations: ${search.report.citations.join(" | ") || "None"}`,
+        ].join("\n")
+      : null;
+
   return [
     `\n\nServer-side ${mode} results are already available for this turn.`,
     `Provider: ${search.provider ?? "unknown"}`,
     verifiedAnswer
       ? `Verified answer hint:\n${verifiedAnswer.promptHint}`
       : "No deterministic verified answer was extracted; synthesize from the ranked sources below.",
+    report ??
+      "No server-side research report was generated; synthesize from the evidence below.",
     "Use these ranked sources before relying on model memory. The first source is the highest-priority source after server-side ranking.",
     "If sources conflict, prefer official government or primary-source domains over Wikipedia, social media, or older secondary summaries.",
     "Do not assume the first raw web result is correct unless it is also the highest-priority ranked source below.",
