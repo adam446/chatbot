@@ -58,6 +58,12 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
       sourceImage && canSendSourceImageToNvidia()
     );
 
+    if (sourceImage && !sendSourceImage) {
+      throw new Error(
+        "Uploaded image editing is not configured. Set NVIDIA_IMAGE_EDIT_API_URL and NVIDIA_IMAGE_ENABLE_SOURCE_EDIT=1 to enable source-image edits."
+      );
+    }
+
     dataStream.write({
       data: {
         message: sourceImage
@@ -72,10 +78,7 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     });
 
     const image = await generateNvidiaImage({
-      prompt:
-        sourceImage && !sendSourceImage
-          ? `${title}. Create a new image inspired by the uploaded reference image.`
-          : title,
+      prompt: title,
       sourceImageBase64: sendSourceImage ? sourceImage?.base64 : undefined,
       sourceImageMimeType: sendSourceImage ? sourceImage?.mimeType : undefined,
     });
@@ -111,6 +114,12 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     }
 
     const sendSourceImage = canSendSourceImageToNvidia();
+    if (!sendSourceImage) {
+      throw new Error(
+        "Uploaded image editing is not configured. Set NVIDIA_IMAGE_EDIT_API_URL and NVIDIA_IMAGE_ENABLE_SOURCE_EDIT=1 to enable source-image edits."
+      );
+    }
+
     dataStream.write({
       data: {
         message: "Generating updated image...",
