@@ -201,6 +201,20 @@ function isImageCreationOrEditRequest(text: string) {
   );
 }
 
+function isExplicitImageArtifactRequest(text: string) {
+  const normalized = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return (
+    isImageCreationOrEditRequest(text) &&
+    /\b(image|picture|photo|illustration|drawing|dessin|visuel|visual|poster|affiche|logo|avatar)\b/.test(
+      normalized
+    )
+  );
+}
+
 function asksForNewImageArtifact(text: string) {
   const normalized = text
     .toLowerCase()
@@ -544,6 +558,15 @@ export async function POST(request: Request) {
       Boolean(latestImageDocument) &&
       isImageCreationOrEditRequest(searchQuery) &&
       !asksForNewImageArtifact(searchQuery);
+    const shouldCreateImageArtifact =
+      !shouldUseImageToolPlanning &&
+      !shouldUpdateExistingImageArtifact &&
+      !hasCurrentImageAttachment &&
+      isExplicitImageArtifactRequest(searchQuery);
+    const shouldUseImageArtifactTool =
+      shouldUseImageToolPlanning ||
+      shouldUpdateExistingImageArtifact ||
+      shouldCreateImageArtifact;
     const messagesForModel = shouldUseImageToolPlanning
       ? stripImageAttachmentsForToolPlanning(uiMessages)
       : stripNonLatestImageAttachments(uiMessages);
@@ -565,6 +588,7 @@ export async function POST(request: Request) {
       hasSearchQuery: Boolean(searchQuery),
       latestImageDocumentId: latestImageDocument?.id ?? null,
       searchMode,
+      shouldCreateImageArtifact,
       shouldUpdateExistingImageArtifact,
       shouldUseImageToolPlanning,
     });
@@ -694,11 +718,13 @@ export async function POST(request: Request) {
           ? '\n\nThe current user message includes an uploaded image and asks to create or modify an image. You MUST call createDocument exactly once with kind "image". Use a short display title, and put the user\'s complete requested transformation in the prompt field. The prompt must explicitly preserve the source image subject identity, face, pose, framing, background, line art/style, and original colors unless the user asked to change them. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
           : shouldUpdateExistingImageArtifact && latestImageDocument
             ? `\n\nThe current user message asks to modify the existing image artifact titled "${latestImageDocument.title}". You MUST call updateDocument exactly once with id "${latestImageDocument.id}" and description equal to the user's full request. Do not call createDocument. Preserve the current image subject identity, face, pose, framing, background, line art/style, and original colors unless the user explicitly asks to change them. If the requested visual change is unclear, ask one concise clarification question instead of creating a new image.`
-            : "";
+            : shouldCreateImageArtifact
+              ? '\n\nThe current user message asks to generate an image artifact. You MUST call createDocument exactly once with kind "image". Use a short display title, and put the user\'s complete image request in the prompt field. If server-side search results are present, use them only as context to enrich the image prompt; do not answer with search text instead of creating the image. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
+              : "";
 
         let hasAssistantText = false;
 
-        if (fallbackVerifiedAnswer) {
+        if (fallbackVerifiedAnswer && !shouldUseImageArtifactTool) {
           stopWaitingStatus();
           writeAssistantTextFallback({
             dataStream,
@@ -723,23 +749,25 @@ export async function POST(request: Request) {
             ? ["createDocument"]
             : shouldUpdateExistingImageArtifact
               ? ["updateDocument"]
-              : hasCurrentImageAttachment ||
-                  (isReasoningModel && !supportsTools)
-                ? []
-                : [
-                    "searchDocuments",
-                    "searchWeb",
-                    "deepSearch",
-                    "getSkillDetails",
-                    "getItems",
-                    "getItemById",
-                    "submitAction",
-                    "getWeather",
-                    "createDocument",
-                    "editDocument",
-                    "updateDocument",
-                    "requestSuggestions",
-                  ],
+              : shouldCreateImageArtifact
+                ? ["createDocument"]
+                : hasCurrentImageAttachment ||
+                    (isReasoningModel && !supportsTools)
+                  ? []
+                  : [
+                      "searchDocuments",
+                      "searchWeb",
+                      "deepSearch",
+                      "getSkillDetails",
+                      "getItems",
+                      "getItemById",
+                      "submitAction",
+                      "getWeather",
+                      "createDocument",
+                      "editDocument",
+                      "updateDocument",
+                      "requestSuggestions",
+                    ],
           instructions: `${buildSystemPrompt()}${searchInstructions}${imageToolInstructions}${serverSearchContext}`,
           messages: modelMessages,
           model: getLanguageModel(chatModel),
@@ -775,11 +803,7 @@ export async function POST(request: Request) {
               openai: { reasoningEffort: modelConfig.reasoningEffort },
             }),
           },
-          stopWhen: isStepCount(
-            shouldUseImageToolPlanning || shouldUpdateExistingImageArtifact
-              ? 2
-              : 5
-          ),
+          stopWhen: isStepCount(shouldUseImageArtifactTool ? 2 : 5),
           telemetry: {
             functionId: "stream-text",
             isEnabled: isProductionEnvironment,
