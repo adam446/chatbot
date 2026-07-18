@@ -1,6 +1,11 @@
 import { auth } from "@/app/(auth)/auth";
 import { getChatById, getMessagesByChatId } from "@/lib/db/queries";
+import { ChatbotError } from "@/lib/errors";
 import { convertToUIMessages } from "@/lib/utils";
+
+function shortId(value?: string | null) {
+  return value ? `${value.slice(0, 8)}...${value.slice(-4)}` : null;
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -10,10 +15,9 @@ export async function GET(request: Request) {
     return Response.json({ error: "chatId required" }, { status: 400 });
   }
 
-  const [session, chat, messages] = await Promise.all([
+  const [session, chat] = await Promise.all([
     auth(),
     getChatById({ id: chatId }),
-    getMessagesByChatId({ id: chatId }),
   ]);
 
   if (!chat) {
@@ -29,10 +33,18 @@ export async function GET(request: Request) {
     chat.visibility === "private" &&
     (!session?.user || session.user.id !== chat.userId)
   ) {
-    return Response.json({ error: "forbidden" }, { status: 403 });
+    console.warn("[messages] forbidden private chat access", {
+      chatId: shortId(chatId),
+      chatUserId: shortId(chat.userId),
+      sessionUserId: shortId(session?.user?.id),
+      visibility: chat.visibility,
+    });
+
+    return new ChatbotError("forbidden:chat").toResponse();
   }
 
   const isReadonly = !session?.user || session.user.id !== chat.userId;
+  const messages = await getMessagesByChatId({ id: chatId });
 
   return Response.json({
     isReadonly,

@@ -3,7 +3,7 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   type Dispatch,
@@ -58,6 +58,7 @@ function extractChatId(pathname: string): string | null {
 
 export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { setDataStream, setWaitingStatus } = useDataStream();
   const { mutate } = useSWRConfig();
 
@@ -82,7 +83,11 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const [input, setInput] = useState("");
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
 
-  const { data: chatData, isLoading } = useSWR(
+  const {
+    data: chatData,
+    error: chatError,
+    isLoading,
+  } = useSWR(
     isNewChat
       ? null
       : `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/messages?chatId=${chatId}`,
@@ -96,6 +101,25 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const visibility: VisibilityType = isNewChat
     ? "private"
     : (chatData?.visibility ?? "private");
+
+  useEffect(() => {
+    if (!chatError || isNewChat) {
+      return;
+    }
+
+    if (
+      chatError instanceof ChatbotError &&
+      chatError.type === "forbidden" &&
+      chatError.surface === "chat"
+    ) {
+      toast({
+        description:
+          "Ce chat privé appartient à une autre session. Nouveau chat ouvert.",
+        type: "error",
+      });
+      router.replace("/");
+    }
+  }, [chatError, isNewChat, router]);
 
   const {
     messages,
