@@ -190,6 +190,57 @@ function getSearchQuery(message?: ChatMessage) {
   return text.slice(0, 500);
 }
 
+function isImageCreationOrEditRequest(text: string) {
+  const normalized = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return /\b(create|generate|make|draw|edit|modify|replace|change|transform|restyle|swap|add|remove|cree|creer|genere|generer|modifie|modifier|remplace|remplacer|change|transforme|ajoute|ajouter|enleve|enlever)\b/.test(
+    normalized
+  );
+}
+
+function stripImageAttachmentsForToolPlanning(messages: ChatMessage[]) {
+  return messages.map((msg, index) => {
+    if (msg.role !== "user") {
+      return msg;
+    }
+
+    const imageParts = msg.parts.filter(
+      (part) =>
+        part.type === "file" &&
+        "mediaType" in part &&
+        typeof part.mediaType === "string" &&
+        part.mediaType.startsWith("image/")
+    );
+
+    if (imageParts.length === 0) {
+      return msg;
+    }
+
+    const nonImageParts = msg.parts.filter(
+      (part) => !imageParts.includes(part)
+    );
+    const isLatestMessage = index === messages.length - 1;
+
+    return {
+      ...msg,
+      parts: [
+        ...nonImageParts,
+        ...(isLatestMessage
+          ? [
+              {
+                text: '\n\n[An uploaded image is attached to this turn. For image modification or image generation requests, call createDocument exactly once with kind "image". The server will pass the uploaded image to the image tool automatically; do not output JSON.]',
+                type: "text" as const,
+              },
+            ]
+          : []),
+      ],
+    };
+  });
+}
+
 function formatServerSearchContext(
   mode: "search" | "deep",
   search:
@@ -372,12 +423,6 @@ export async function POST(request: Request) {
     const isReasoningModel = capabilities?.reasoning === true;
     const supportsTools = capabilities?.tools === true;
 
-    const modelMessages = await convertToModelMessages(
-      await hydratePrivateAttachmentsForModel({
-        messages: uiMessages,
-        userId: session.user.id,
-      })
-    );
     const currentImageAttachmentUrls =
       message?.parts
         .filter(
@@ -398,6 +443,17 @@ export async function POST(request: Request) {
         .map((part) => part.url) ?? [];
     const hasCurrentImageAttachment = currentImageAttachmentUrls.length > 0;
     const searchQuery = getSearchQuery(message as ChatMessage | undefined);
+    const shouldUseImageToolPlanning =
+      hasCurrentImageAttachment && isImageCreationOrEditRequest(searchQuery);
+    const hydratedMessages = await hydratePrivateAttachmentsForModel({
+      messages: uiMessages,
+      userId: session.user.id,
+    });
+    const modelMessages = await convertToModelMessages(
+      shouldUseImageToolPlanning
+        ? stripImageAttachmentsForToolPlanning(hydratedMessages)
+        : hydratedMessages
+    );
     const automaticSearchMode = getAutomaticSearchMode(searchQuery);
     const effectiveSearchMode =
       searchMode === "off" ? automaticSearchMode : searchMode;
@@ -406,9 +462,11 @@ export async function POST(request: Request) {
       automaticSearchMode,
       commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
       effectiveSearchMode,
+      hasCurrentImageAttachment,
       hasMessage: Boolean(message),
       hasSearchQuery: Boolean(searchQuery),
       searchMode,
+      shouldUseImageToolPlanning,
     });
 
     const stream = createUIMessageStream({
@@ -532,6 +590,9 @@ export async function POST(request: Request) {
             : effectiveSearchMode === "deep"
               ? "\n\nDeep search mode is enabled for this turn. The server may have already injected source-backed deep search results below. If server-side results are present, answer from them and cite URLs. If no server-side results are present, call deepSearch with the user's research question before answering. If deepSearch is not configured or returns no useful result, say that clearly."
               : "";
+        const imageToolInstructions = shouldUseImageToolPlanning
+          ? '\n\nThe current user message includes an uploaded image and asks to create or modify an image. You MUST call createDocument exactly once with kind "image". Use the user\'s requested transformation as the title. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
+          : "";
 
         let hasAssistantText = false;
 
@@ -557,7 +618,8 @@ export async function POST(request: Request) {
 
         const result = streamText({
           activeTools:
-            hasCurrentImageAttachment || (isReasoningModel && !supportsTools)
+            (hasCurrentImageAttachment && !shouldUseImageToolPlanning) ||
+            (isReasoningModel && !supportsTools)
               ? []
               : [
                   "searchDocuments",
@@ -573,7 +635,7 @@ export async function POST(request: Request) {
                   "updateDocument",
                   "requestSuggestions",
                 ],
-          instructions: `${buildSystemPrompt()}${searchInstructions}${serverSearchContext}`,
+          instructions: `${buildSystemPrompt()}${searchInstructions}${imageToolInstructions}${serverSearchContext}`,
           messages: modelMessages,
           model: getLanguageModel(chatModel),
           onAbort() {
