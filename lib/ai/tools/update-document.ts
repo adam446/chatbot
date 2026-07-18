@@ -19,7 +19,7 @@ export const updateDocument = ({
 }: UpdateDocumentProps) =>
   tool({
     description:
-      "Full rewrite of an existing artifact. Use this to modify existing image artifacts, or for major text/code/sheet changes where most content needs replacing. Prefer editDocument for targeted non-image changes.",
+      "Full rewrite of an existing artifact. Use this to modify existing image artifacts when the user asks to add, remove, replace, restyle, or change anything in the current image. Do not create a new image artifact for follow-up image edits. Prefer editDocument for targeted non-image changes.",
     execute: async ({ id, description }) => {
       const document = await getDocumentById({ id });
 
