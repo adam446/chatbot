@@ -12,6 +12,14 @@ const DEFAULT_SEED = 0;
 const DEFAULT_STEPS = 8;
 const DEFAULT_DEEPINFRA_IMAGE_EDIT_URL =
   "https://api.deepinfra.com/v1/openai/images/edits";
+const DEEPINFRA_IMAGE_EDIT_MODEL_ALIASES: Record<string, string> = {
+  "black-forest-labs/flux-2-klein-4b": "black-forest-labs/FLUX-2-klein-4b",
+  "black-forest-labs/flux.2-klein-4b": "black-forest-labs/FLUX-2-klein-4b",
+  "qwen/qwen-image-edit": DEFAULT_DEEPINFRA_IMAGE_EDIT_MODEL,
+  "qwen/qwen-image-edit-2509": DEFAULT_DEEPINFRA_IMAGE_EDIT_MODEL,
+  "qwen/qwen-image-edit-2511": DEFAULT_DEEPINFRA_IMAGE_EDIT_MODEL,
+  "qwen/qwen-image-edit-max": "Qwen/Qwen-Image-Edit-Max",
+};
 
 type NvidiaImageRequest = {
   prompt: string;
@@ -29,9 +37,13 @@ function getImageEditProvider() {
   return process.env.NVIDIA_IMAGE_EDIT_PROVIDER?.toLowerCase();
 }
 
+function normalizeDeepInfraImageEditModel(model: string) {
+  return DEEPINFRA_IMAGE_EDIT_MODEL_ALIASES[model.toLowerCase()] ?? model;
+}
+
 function getImageEditModel() {
   if (getImageEditProvider() === "deepinfra") {
-    return (
+    return normalizeDeepInfraImageEditModel(
       process.env.NVIDIA_IMAGE_EDIT_MODEL ?? DEFAULT_DEEPINFRA_IMAGE_EDIT_MODEL
     );
   }
