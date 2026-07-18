@@ -111,7 +111,127 @@ function assertValidGeneratedImage(base64: string) {
     imageBuffer.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))
   ) {
     assertPngIsVisible(imageBuffer);
+    return;
   }
+
+  if (imageBuffer.subarray(0, 2).equals(Buffer.from("ffd8", "hex"))) {
+    assertCompressedImageIsLikelyVisible({
+      buffer: imageBuffer,
+      dimensions: getJpegDimensions(imageBuffer),
+      format: "JPEG",
+    });
+    return;
+  }
+
+  if (
+    imageBuffer.length >= 12 &&
+    imageBuffer.toString("ascii", 0, 4) === "RIFF" &&
+    imageBuffer.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    assertCompressedImageIsLikelyVisible({
+      buffer: imageBuffer,
+      dimensions: getWebpDimensions(imageBuffer),
+      format: "WebP",
+    });
+  }
+}
+
+function assertCompressedImageIsLikelyVisible({
+  buffer,
+  dimensions,
+  format,
+}: {
+  buffer: Buffer;
+  dimensions: { height: number; width: number };
+  format: string;
+}) {
+  const pixels = dimensions.width * dimensions.height;
+
+  if (pixels <= 0) {
+    throw new Error(`Generated ${format} is missing dimensions`);
+  }
+
+  // Solid black/blank 1024px generations compress to only a few KB. Real
+  // generated images should retain enough encoded detail for their dimensions.
+  if (pixels >= 262_144 && buffer.length / pixels < 0.02) {
+    throw new Error(`Generated ${format} appears blank, black, or empty`);
+  }
+}
+
+function getJpegDimensions(buffer: Buffer) {
+  let offset = 2;
+
+  while (offset + 9 < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = buffer[offset + 1];
+    offset += 2;
+
+    if (marker === 0xd8 || marker === 0xd9) {
+      continue;
+    }
+
+    if (marker === 0xda) {
+      break;
+    }
+
+    if (offset + 2 > buffer.length) {
+      break;
+    }
+
+    const segmentLength = buffer.readUInt16BE(offset);
+    if (segmentLength < 2 || offset + segmentLength > buffer.length) {
+      break;
+    }
+
+    const isStartOfFrame =
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf);
+
+    if (isStartOfFrame && segmentLength >= 7) {
+      return {
+        height: buffer.readUInt16BE(offset + 3),
+        width: buffer.readUInt16BE(offset + 5),
+      };
+    }
+
+    offset += segmentLength;
+  }
+
+  throw new Error("Generated JPEG is missing dimensions");
+}
+
+function getWebpDimensions(buffer: Buffer) {
+  const chunkType = buffer.toString("ascii", 12, 16);
+
+  if (chunkType === "VP8X" && buffer.length >= 30) {
+    return {
+      height: 1 + buffer[27] + (buffer[28] << 8) + (buffer[29] << 16),
+      width: 1 + buffer[24] + (buffer[25] << 8) + (buffer[26] << 16),
+    };
+  }
+
+  if (chunkType === "VP8 " && buffer.length >= 30) {
+    return {
+      height: buffer.readUInt16LE(28) & 0x3f_ff,
+      width: buffer.readUInt16LE(26) & 0x3f_ff,
+    };
+  }
+
+  if (chunkType === "VP8L" && buffer.length >= 25) {
+    const bits = buffer.readUInt32LE(21);
+    return {
+      height: 1 + ((bits >> 14) & 0x3f_ff),
+      width: 1 + (bits & 0x3f_ff),
+    };
+  }
+
+  throw new Error("Generated WebP is missing dimensions");
 }
 
 function readUInt32(buffer: Buffer, offset: number) {
