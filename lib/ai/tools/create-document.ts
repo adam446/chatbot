@@ -26,7 +26,7 @@ export const createDocument = ({
 }: CreateDocumentProps) =>
   tool({
     description:
-      "Create an artifact. You MUST specify kind: use 'code' for any programming/algorithm request (creates a script), 'text' for essays/writing (creates a document), 'sheet' for spreadsheets/data, 'image' for image generation or editing from an uploaded image. Image requests always run server-side NVIDIA safety before generation.",
+      "Create an artifact through this tool call only. Never write createDocument, JSON, or pseudo-code in chat. You MUST specify kind: use 'code' for any programming/algorithm request (creates a script), 'text' for essays/writing (creates a document), 'sheet' for spreadsheets/data, 'image' for image generation or editing from an uploaded image. Image requests always run server-side NVIDIA safety before generation.",
     execute: async ({ title, kind, prompt, sourceImageUrl }) => {
       const id = generateUUID();
 

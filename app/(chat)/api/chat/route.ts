@@ -812,6 +812,12 @@ export async function POST(request: Request) {
             functionId: "stream-text",
             isEnabled: isProductionEnvironment,
           },
+          toolChoice:
+            shouldUseImageToolPlanning || shouldCreateImageArtifact
+              ? { toolName: "createDocument", type: "tool" }
+              : shouldUpdateExistingImageArtifact
+                ? { toolName: "updateDocument", type: "tool" }
+                : "auto",
           tools: {
             ...createTools(bearerToken),
             createDocument: createDocument({
