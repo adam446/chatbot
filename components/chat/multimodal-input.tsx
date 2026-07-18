@@ -67,10 +67,114 @@ import type { VisibilityType } from "./visibility-selector";
 
 type SearchMode = "off" | "search" | "deep";
 
+const MAX_CLIENT_UPLOAD_BYTES = 4.3 * 1024 * 1024;
+const MAX_UPLOAD_IMAGE_DIMENSION = 1600;
+const TARGET_UPLOAD_BYTES = 1.8 * 1024 * 1024;
+const UPLOAD_IMAGE_QUALITIES = [0.82, 0.72, 0.62, 0.52];
+
 function setCookie(name: string, value: string) {
   const maxAge = 60 * 60 * 24 * 365;
   // biome-ignore lint/suspicious/noDocumentCookie: needed for client-side cookie setting
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}`;
+}
+
+function replaceFileExtension(filename: string, extension: string) {
+  const base = filename.replace(/\.[^.]+$/, "");
+  return `${base || "image"}.${extension}`;
+}
+
+function loadImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read image"));
+    };
+    image.src = url;
+  });
+}
+
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality: number
+) {
+  return new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, type, quality);
+  });
+}
+
+async function optimizeImageForUpload(file: File) {
+  if (!file.type.startsWith("image/")) {
+    return file;
+  }
+
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    throw new Error("File type should be JPEG, PNG, or WebP");
+  }
+
+  const image = await loadImage(file);
+  const scale = Math.min(
+    1,
+    MAX_UPLOAD_IMAGE_DIMENSION / Math.max(image.width, image.height)
+  );
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const shouldOptimize = scale < 1 || file.size > TARGET_UPLOAD_BYTES;
+
+  if (!shouldOptimize && file.size <= MAX_CLIENT_UPLOAD_BYTES) {
+    return file;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return file;
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+
+  const candidates = await Promise.all(
+    ["image/webp", "image/jpeg"].flatMap((type) =>
+      UPLOAD_IMAGE_QUALITIES.map(async (quality) => ({
+        blob: await canvasToBlob(canvas, type, quality),
+        type,
+      }))
+    )
+  );
+
+  for (const { blob, type } of candidates) {
+    if (!blob) {
+      continue;
+    }
+
+    const extension = type === "image/webp" ? "webp" : "jpg";
+    const optimized = new File(
+      [blob],
+      replaceFileExtension(file.name, extension),
+      { type }
+    );
+
+    if (
+      optimized.size <= MAX_CLIENT_UPLOAD_BYTES &&
+      optimized.size < file.size
+    ) {
+      return optimized;
+    }
+  }
+
+  if (file.size <= MAX_CLIENT_UPLOAD_BYTES) {
+    return file;
+  }
+
+  throw new Error("Image is too large. Try a smaller image.");
 }
 
 function PureMultimodalInput({
@@ -280,8 +384,23 @@ function PureMultimodalInput({
   ]);
 
   const uploadFile = useCallback(async (file: File) => {
+    let fileToUpload: File;
+    try {
+      fileToUpload = await optimizeImageForUpload(file);
+      if (fileToUpload.size < file.size) {
+        toast.info(
+          `Image optimized (${Math.round(file.size / 1024)}KB -> ${Math.round(fileToUpload.size / 1024)}KB)`
+        );
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to optimize image"
+      );
+      return;
+    }
+
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", fileToUpload);
 
     try {
       const response = await fetch(
