@@ -65,6 +65,11 @@ export const maxDuration = 60;
 
 const HEALTH_CHECK_DELAY_MS = 9000;
 const BOTID_ENABLED = process.env.NEXT_PUBLIC_BOTID_ENABLED === "1";
+const MODEL_IMAGE_CONTENT_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 function isModelStreamActivity(chunk: { type: string }) {
   return !["start", "start-step", "finish-step", "finish", "raw"].includes(
@@ -128,16 +133,33 @@ async function hydratePrivateAttachmentPart({
   }
 
   if (!pathname.startsWith(`attachments/${userId}/`)) {
-    return part;
+    throw new Error("Uploaded image does not belong to the current user");
   }
 
   const result = await get(pathname, { access: "private", useCache: false });
   if (result?.statusCode !== 200) {
-    return part;
+    throw new Error(
+      `Uploaded image is not readable from Blob storage (${result?.statusCode ?? "unknown"})`
+    );
   }
 
   const contentType = result.blob.contentType || part.mediaType;
+  if (!MODEL_IMAGE_CONTENT_TYPES.has(contentType)) {
+    throw new Error(
+      `Uploaded image content type is unsupported: ${contentType}`
+    );
+  }
+
   const buffer = Buffer.from(await new Response(result.stream).arrayBuffer());
+  if (buffer.length === 0) {
+    throw new Error("Uploaded image is empty after reading from Blob storage");
+  }
+
+  console.info("[chat] hydrated private image attachment", {
+    bytes: buffer.length,
+    contentType,
+    pathname,
+  });
 
   return {
     ...part,

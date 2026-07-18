@@ -1,10 +1,11 @@
-import { put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { auth } from "@/app/(auth)/auth";
 
 const MAX_BYTES = 4.5 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 
 const FileSchema = z.object({
   file: z
@@ -13,7 +14,10 @@ const FileSchema = z.object({
       message: "File size should be less than 4.5MB",
     })
     .refine(
-      (file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type),
+      (file) =>
+        ALLOWED_IMAGE_TYPES.includes(
+          file.type as (typeof ALLOWED_IMAGE_TYPES)[number]
+        ),
       {
         message: "File type should be JPEG, PNG, or WebP",
       }
@@ -65,11 +69,51 @@ export async function POST(request: Request) {
         access: "private",
         contentType: file.type,
       });
+      const verification = await get(data.pathname, {
+        access: "private",
+        useCache: false,
+      });
+
+      if (verification?.statusCode !== 200) {
+        throw new Error(
+          `Blob upload verification failed with status ${verification?.statusCode ?? "unknown"}`
+        );
+      }
+
+      const verifiedContentType = verification.blob.contentType || file.type;
+      if (
+        !ALLOWED_IMAGE_TYPES.includes(
+          verifiedContentType as (typeof ALLOWED_IMAGE_TYPES)[number]
+        )
+      ) {
+        throw new Error(
+          `Blob upload verification returned unsupported content type ${verifiedContentType}`
+        );
+      }
+
+      const verifiedSize = verification.blob.size;
+      if (typeof verifiedSize === "number" && verifiedSize <= 0) {
+        throw new Error("Blob upload verification returned an empty file");
+      }
+
+      console.info("[files/upload] verified private blob", {
+        contentType: verifiedContentType,
+        pathname: data.pathname,
+        size: verifiedSize,
+      });
+
       const url = new URL(request.url);
       url.pathname = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/files/view`;
       url.search = new URLSearchParams({ pathname: data.pathname }).toString();
 
-      return NextResponse.json({ ...data, url: url.toString() });
+      return NextResponse.json({
+        ...data,
+        contentType: verifiedContentType,
+        storage: "vercel_blob_private",
+        url: url.toString(),
+        verified: true,
+        verifiedSize,
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown Blob upload error";
