@@ -8,6 +8,7 @@ const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 1024;
 const DEFAULT_CFG_SCALE = 5;
 const DEFAULT_IMAGE_TIMEOUT_MS = 45_000;
+const DEFAULT_IMAGE_EDIT_TIMEOUT_MS = 35_000;
 const DEFAULT_SEED = 0;
 const DEFAULT_STEPS = 8;
 const DEFAULT_DEEPINFRA_IMAGE_EDIT_URL =
@@ -215,7 +216,14 @@ function buildDeepInfraImageEditBody({
   return body;
 }
 
-function getImageTimeoutMs() {
+function getImageTimeoutMs(hasSourceImage = false) {
+  if (hasSourceImage) {
+    return getNumberEnv(
+      "NVIDIA_IMAGE_EDIT_TIMEOUT_MS",
+      getNumberEnv("NVIDIA_IMAGE_TIMEOUT_MS", DEFAULT_IMAGE_EDIT_TIMEOUT_MS)
+    );
+  }
+
   return getNumberEnv("NVIDIA_IMAGE_TIMEOUT_MS", DEFAULT_IMAGE_TIMEOUT_MS);
 }
 
@@ -339,6 +347,7 @@ export async function generateNvidiaImage({
   }
 
   let response: Response;
+  const imageTimeoutMs = getImageTimeoutMs(hasSourceImage);
   try {
     if (sourceImageBase64 && getImageEditProvider() === "deepinfra") {
       response = await fetch(getImageApiUrl(true), {
@@ -352,7 +361,7 @@ export async function generateNvidiaImage({
           Authorization: `Bearer ${apiKey}`,
         },
         method: "POST",
-        signal: AbortSignal.timeout(getImageTimeoutMs()),
+        signal: AbortSignal.timeout(imageTimeoutMs),
       });
     } else {
       response = await fetch(getImageApiUrl(hasSourceImage), {
@@ -365,13 +374,16 @@ export async function generateNvidiaImage({
           "Content-Type": "application/json",
         },
         method: "POST",
-        signal: AbortSignal.timeout(getImageTimeoutMs()),
+        signal: AbortSignal.timeout(imageTimeoutMs),
       });
     }
   } catch (error) {
-    if (error instanceof Error && error.name === "TimeoutError") {
+    if (
+      error instanceof Error &&
+      (error.name === "TimeoutError" || error.name === "AbortError")
+    ) {
       throw new Error(
-        `NVIDIA image request timed out after ${getImageTimeoutMs()}ms`,
+        `NVIDIA image request timed out after ${imageTimeoutMs}ms`,
         { cause: error }
       );
     }
