@@ -14,6 +14,50 @@ function getModelName(modelId: string) {
   return chatModels.find((model) => model.id === modelId)?.name ?? modelId;
 }
 
+function normalizePrompt(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function getImageEditClarification(prompt: string) {
+  const normalized = normalizePrompt(prompt);
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const vagueReference =
+    /\b(ca|cela|ceci|this|that|it|thing|truc|image|photo)\b/.test(normalized);
+  const hasAction =
+    /\b(change|modifier|modifie|remplace|remplacer|ajoute|ajouter|enleve|enlever|ameliore|ameliorer|edit|modify|replace|add|remove|improve|transform)\b/.test(
+      normalized
+    );
+  const hasConcreteTarget =
+    /\b(vetement|tenue|habit|chemise|manteau|blouse|couleur|fond|background|visage|face|cheveux|hair|yeux|eyes|style|pose|personnage|character|logo|texte|text|shirt|coat|clothes|outfit|uniform)\b/.test(
+      normalized
+    );
+
+  if (words.length < 3 || (hasAction && vagueReference && !hasConcreteTarget)) {
+    return "Clarification needed: please specify exactly what to change in the image and what should stay unchanged.";
+  }
+
+  return null;
+}
+
+function buildImagePrompt({
+  mode,
+  prompt,
+}: {
+  mode: "create" | "edit";
+  prompt: string;
+}) {
+  if (mode === "create") {
+    return `${prompt}\n\nGenerate a complete, visible, non-empty image. Do not generate a blank, solid black, transparent, mask-only, or alpha-only output.`;
+  }
+
+  return `${prompt}
+
+Edit the source image directly. Preserve the same subject identity, face, pose, framing, background, line art, visual style, and original colors unless the user explicitly asked to change one of those. Change only the requested elements. Return a complete visible image, not a mask, not an alpha map, not a blank frame, and not a solid black image.`;
+}
+
 export const imageDocumentHandler = createDocumentHandler<"image">({
   kind: "image",
   onCreateDocument: async ({
@@ -24,6 +68,17 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     sourceImageUrl,
   }) => {
     const imagePrompt = prompt ?? title;
+    const editClarification = sourceImageUrl
+      ? getImageEditClarification(imagePrompt)
+      : null;
+
+    if (editClarification) {
+      throw new Error(editClarification);
+    }
+    const generationPrompt = buildImagePrompt({
+      mode: sourceImageUrl ? "edit" : "create",
+      prompt: imagePrompt,
+    });
 
     dataStream.write({
       data: {
@@ -38,7 +93,7 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
 
     const safety = await evaluateImageSafety({
       mode: sourceImageUrl ? "edit" : "create",
-      prompt: imagePrompt,
+      prompt: generationPrompt,
       sourceImagePresent: Boolean(sourceImageUrl),
     });
 
@@ -86,7 +141,7 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     });
 
     const image = await generateNvidiaImage({
-      prompt: imagePrompt,
+      prompt: generationPrompt,
       sourceImageBase64: sendSourceImage ? sourceImage?.base64 : undefined,
       sourceImageMimeType: sendSourceImage ? sourceImage?.mimeType : undefined,
     });
@@ -100,6 +155,17 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     return image;
   },
   onUpdateDocument: async ({ document, description, dataStream, modelId }) => {
+    const editClarification = getImageEditClarification(description);
+
+    if (editClarification) {
+      throw new Error(editClarification);
+    }
+
+    const generationPrompt = buildImagePrompt({
+      mode: "edit",
+      prompt: description,
+    });
+
     dataStream.write({
       data: {
         message: "Checking image safety...",
@@ -113,7 +179,7 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
 
     const safety = await evaluateImageSafety({
       mode: "edit",
-      prompt: description,
+      prompt: generationPrompt,
       sourceImagePresent: true,
     });
 
@@ -140,7 +206,7 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     });
 
     const image = await generateNvidiaImage({
-      prompt: description,
+      prompt: generationPrompt,
       sourceImageBase64: sendSourceImage
         ? (document.content ?? undefined)
         : undefined,

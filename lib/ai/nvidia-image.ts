@@ -1,3 +1,4 @@
+import { inflateSync } from "node:zlib";
 import { get } from "@vercel/blob";
 import { z } from "zod";
 
@@ -28,6 +29,14 @@ type NvidiaImageRequest = {
   prompt: string;
   sourceImageBase64?: string;
   sourceImageMimeType?: string;
+};
+
+type PngInfo = {
+  bitDepth: number;
+  colorType: number;
+  data: Buffer;
+  height: number;
+  width: number;
 };
 
 const stringRecordSchema = z.record(z.string(), z.unknown());
@@ -89,6 +98,190 @@ function getImageApiKey(hasSourceImage: boolean) {
 
 function stripDataUrlPrefix(value: string) {
   return value.replace(/^data:image\/(?:png|jpeg|jpg|webp);base64,/i, "");
+}
+
+function assertValidGeneratedImage(base64: string) {
+  const imageBuffer = Buffer.from(base64, "base64");
+
+  if (imageBuffer.length < 2048) {
+    throw new Error("Generated image was too small to be valid");
+  }
+
+  if (
+    imageBuffer.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))
+  ) {
+    assertPngIsVisible(imageBuffer);
+  }
+}
+
+function readUInt32(buffer: Buffer, offset: number) {
+  if (offset + 4 > buffer.length) {
+    throw new Error("Generated PNG is truncated");
+  }
+
+  return buffer.readUInt32BE(offset);
+}
+
+function parsePng(buffer: Buffer): PngInfo {
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  const idatChunks: Buffer[] = [];
+
+  while (offset + 12 <= buffer.length) {
+    const length = readUInt32(buffer, offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+
+    if (dataEnd + 4 > buffer.length) {
+      throw new Error("Generated PNG is truncated");
+    }
+
+    const data = buffer.subarray(dataStart, dataEnd);
+
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      [, , , , , , , , bitDepth, colorType] = data;
+    } else if (type === "IDAT") {
+      idatChunks.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+
+    offset = dataEnd + 4;
+  }
+
+  if (width <= 0 || height <= 0 || idatChunks.length === 0) {
+    throw new Error("Generated PNG is missing image data");
+  }
+
+  return {
+    bitDepth,
+    colorType,
+    data: inflateSync(Buffer.concat(idatChunks)),
+    height,
+    width,
+  };
+}
+
+function bytesPerPixel({
+  bitDepth,
+  colorType,
+}: Pick<PngInfo, "bitDepth" | "colorType">) {
+  if (bitDepth !== 8) {
+    return null;
+  }
+
+  switch (colorType) {
+    case 0:
+      return 1;
+    case 2:
+      return 3;
+    case 4:
+      return 2;
+    case 6:
+      return 4;
+    default:
+      return null;
+  }
+}
+
+function unfilterPngScanline({
+  bpp,
+  current,
+  filter,
+  previous,
+}: {
+  bpp: number;
+  current: Buffer;
+  filter: number;
+  previous: Buffer;
+}) {
+  for (let i = 0; i < current.length; i += 1) {
+    const left = i >= bpp ? current[i - bpp] : 0;
+    const up = previous[i] ?? 0;
+    const upLeft = i >= bpp ? previous[i - bpp] : 0;
+
+    if (filter === 1) {
+      current[i] = (current[i] + left) & 0xff;
+    } else if (filter === 2) {
+      current[i] = (current[i] + up) & 0xff;
+    } else if (filter === 3) {
+      current[i] = (current[i] + Math.floor((left + up) / 2)) & 0xff;
+    } else if (filter === 4) {
+      const p = left + up - upLeft;
+      const pa = Math.abs(p - left);
+      const pb = Math.abs(p - up);
+      const pc = Math.abs(p - upLeft);
+      const predictor = pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft;
+      current[i] = (current[i] + predictor) & 0xff;
+    } else if (filter !== 0) {
+      throw new Error("Generated PNG uses an unsupported filter");
+    }
+  }
+}
+
+function assertPngIsVisible(buffer: Buffer) {
+  const png = parsePng(buffer);
+  const bpp = bytesPerPixel(png);
+
+  if (!bpp) {
+    return;
+  }
+
+  const stride = png.width * bpp;
+  let offset = 0;
+  let previous = Buffer.alloc(stride);
+  let sampledPixels = 0;
+  let visiblePixels = 0;
+  let brightnessTotal = 0;
+
+  for (let y = 0; y < png.height; y += 1) {
+    const filter = png.data[offset];
+    const current = Buffer.from(
+      png.data.subarray(offset + 1, offset + 1 + stride)
+    );
+    unfilterPngScanline({ bpp, current, filter, previous });
+
+    const step = Math.max(1, Math.floor(png.width / 128));
+    for (let x = 0; x < png.width; x += step) {
+      const pixelOffset = x * bpp;
+      const alpha =
+        png.colorType === 4 || png.colorType === 6
+          ? current[pixelOffset + bpp - 1]
+          : 255;
+      if (alpha > 12) {
+        const red = current[pixelOffset];
+        const green =
+          png.colorType === 0 || png.colorType === 4
+            ? red
+            : current[pixelOffset + 1];
+        const blue =
+          png.colorType === 0 || png.colorType === 4
+            ? red
+            : current[pixelOffset + 2];
+        const brightness = (red + green + blue) / 3;
+        brightnessTotal += brightness;
+        visiblePixels += 1;
+      }
+      sampledPixels += 1;
+    }
+
+    previous = current;
+    offset += stride + 1;
+  }
+
+  if (sampledPixels === 0 || visiblePixels / sampledPixels < 0.05) {
+    throw new Error("Generated image appears blank or transparent");
+  }
+
+  if (visiblePixels > 0 && brightnessTotal / visiblePixels < 3) {
+    throw new Error("Generated image appears black or empty");
+  }
 }
 
 function extractImageBase64(value: unknown): string | null {
@@ -401,7 +594,9 @@ export async function generateNvidiaImage({
 
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.startsWith("image/")) {
-    return Buffer.from(await response.arrayBuffer()).toString("base64");
+    const image = Buffer.from(await response.arrayBuffer()).toString("base64");
+    assertValidGeneratedImage(image);
+    return image;
   }
 
   const json = await response.json();
@@ -409,6 +604,7 @@ export async function generateNvidiaImage({
   if (!image) {
     throw new Error("NVIDIA image response did not include base64 image data");
   }
+  assertValidGeneratedImage(image);
 
   return image;
 }
