@@ -176,7 +176,7 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    if (status === "submitted" || status === "ready" || status === "error") {
+    if (status === "ready" || status === "error") {
       setWaitingStatus(undefined);
     }
   }, [status, setWaitingStatus]);
