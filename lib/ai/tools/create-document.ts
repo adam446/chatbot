@@ -125,7 +125,7 @@ export const createDocument = ({
         ),
       sourceImageUrl: z
         .string()
-        .url()
+        .min(1)
         .optional()
         .describe(
           "Optional. For editing an uploaded PNG/JPEG, pass the attachment URL from the user's message. Leave empty for text-to-image generation."
