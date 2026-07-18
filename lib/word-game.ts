@@ -1,11 +1,8 @@
 import "server-only";
 
-import { generateText } from "ai";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { DEFAULT_GAME_MODEL } from "@/lib/ai/models";
-import { getLanguageModel } from "@/lib/ai/providers";
 import {
   type WordGame,
   wordGame,
@@ -53,13 +50,120 @@ const MIN_GUESSES = 3;
 const MAX_GUESSES = 10;
 
 const fallbackWords: Record<number, string[]> = {
-  4: ["lune", "port", "rive", "vent"],
-  5: ["table", "monde", "plage", "rouge"],
-  6: ["jardin", "soleil", "voyage", "orange"],
-  7: ["courage", "village", "musique", "passage"],
-  8: ["montagne", "question", "souvenir", "batterie"],
-  9: ["important", "strategie", "categorie", "selection"],
-  10: ["decouverte", "navigation", "collection", "generation"],
+  4: [
+    "aube",
+    "bois",
+    "brin",
+    "ciel",
+    "dune",
+    "film",
+    "four",
+    "gout",
+    "jour",
+    "lait",
+    "lune",
+    "main",
+    "miel",
+    "pain",
+    "port",
+    "rive",
+    "rose",
+    "vent",
+  ],
+  5: [
+    "arbre",
+    "avion",
+    "badge",
+    "carte",
+    "chaud",
+    "chien",
+    "clown",
+    "danse",
+    "fleur",
+    "fruit",
+    "livre",
+    "monde",
+    "plage",
+    "porte",
+    "radio",
+    "route",
+    "rouge",
+    "sable",
+    "table",
+    "vague",
+  ],
+  6: [
+    "animal",
+    "argent",
+    "bateau",
+    "bureau",
+    "camion",
+    "chemin",
+    "crayon",
+    "jardin",
+    "lettre",
+    "orange",
+    "papier",
+    "soleil",
+    "tomate",
+    "voyage",
+  ],
+  7: [
+    "banquet",
+    "cabinet",
+    "courage",
+    "dessert",
+    "fortune",
+    "journal",
+    "machine",
+    "musique",
+    "passage",
+    "poisson",
+    "respect",
+    "village",
+    "voiture",
+  ],
+  8: [
+    "batterie",
+    "boutique",
+    "chocolat",
+    "commerce",
+    "distance",
+    "festival",
+    "montagne",
+    "question",
+    "souvenir",
+    "vacances",
+    "violence",
+  ],
+  9: [
+    "categorie",
+    "continent",
+    "important",
+    "industrie",
+    "magistrat",
+    "militaire",
+    "politique",
+    "president",
+    "selection",
+    "spectacle",
+    "strategie",
+    "telephone",
+    "tradition",
+  ],
+  10: [
+    "collection",
+    "decouverte",
+    "generation",
+    "impression",
+    "navigation",
+    "ordinateur",
+    "population",
+    "protection",
+    "restaurant",
+    "resolution",
+    "television",
+  ],
 };
 
 export function normalizeWord(value: string) {
@@ -105,47 +209,65 @@ function todayKey() {
   }).format(new Date());
 }
 
-function extractWord(text: string) {
-  const match = text.match(/[a-zàâäçéèêëîïôöùûüÿœæ]+/i);
-  return cleanDisplayWord(match?.[0] ?? "");
+function hashString(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
 }
 
-async function generateFrenchWord(length: number, dateSeed?: string) {
-  if (DEFAULT_GAME_MODEL.startsWith("nvidia:") && !process.env.NVIDIA_API_KEY) {
-    throw new Error("Missing NVIDIA_API_KEY for word generation.");
-  }
-
-  const prompt = `Donne un seul mot commun en français de ${length} lettres${
-    dateSeed ? ` pour la date ${dateSeed}` : ""
-  }. Reponds uniquement avec le mot, sans phrase, sans ponctuation. Le mot ne doit pas etre un nom propre, ne doit pas contenir d'espace ni de trait d'union.`;
-
-  const attempts = await Promise.allSettled(
-    Array.from({ length: 3 }, () =>
-      generateText({
-        model: getLanguageModel(DEFAULT_GAME_MODEL),
-        prompt,
-      })
-    )
+function getWordPool(length: number) {
+  return (fallbackWords[length] ?? []).filter(
+    (word) => normalizeWord(word).length === length
   );
+}
 
-  for (const attempt of attempts) {
-    if (attempt.status === "fulfilled") {
-      const word = extractWord(attempt.value.text);
-      const normalizedWord = normalizeWord(word);
-
-      if (normalizedWord.length === length && word.length > 0) {
-        return { normalizedWord, word };
-      }
-    }
+function pickLocalWord({
+  excludedWords,
+  length,
+  seed,
+}: {
+  excludedWords?: Set<string>;
+  length: number;
+  seed?: string;
+}) {
+  const words = getWordPool(length);
+  if (words.length === 0) {
+    throw new Error("Could not create a word for this game.");
   }
 
-  const words = fallbackWords[length] ?? fallbackWords[5];
-  const word = words[Math.floor(Math.random() * words.length)];
+  const available = words.filter(
+    (candidate) => !excludedWords?.has(normalizeWord(candidate))
+  );
+  const choices = available.length > 0 ? available : words;
+  const index = seed
+    ? hashString(`${seed}:${length}`) % choices.length
+    : Math.floor(Math.random() * choices.length);
+  const word = choices[index];
+
   return { normalizedWord: normalizeWord(word), word };
 }
 
-async function getOrCreateDailyWord(length: number, date: string) {
-  const [existing] = await db
+async function getRecentUserWords({
+  length,
+  userId,
+}: {
+  length: number;
+  userId: string;
+}) {
+  const recentGames = await db
+    .select({ normalizedWord: wordGame.normalizedWord })
+    .from(wordGame)
+    .where(and(eq(wordGame.userId, userId), eq(wordGame.length, length)))
+    .orderBy(desc(wordGame.createdAt))
+    .limit(Math.max(20, getWordPool(length).length - 1));
+
+  return new Set(recentGames.map((game) => game.normalizedWord));
+}
+
+async function getExistingDailyWord(length: number, date: string) {
+  const [dailyWord] = await db
     .select()
     .from(wordGameDailyWord)
     .where(
@@ -156,11 +278,49 @@ async function getOrCreateDailyWord(length: number, date: string) {
     )
     .limit(1);
 
+  return dailyWord ?? null;
+}
+
+async function getRecentDailyWords(length: number) {
+  const recentWords = await db
+    .select({ normalizedWord: wordGameDailyWord.normalizedWord })
+    .from(wordGameDailyWord)
+    .where(eq(wordGameDailyWord.length, length))
+    .orderBy(desc(wordGameDailyWord.createdAt))
+    .limit(Math.max(20, getWordPool(length).length - 1));
+
+  return new Set(recentWords.map((word) => word.normalizedWord));
+}
+
+async function getFreeGameExcludedWords({
+  length,
+  userId,
+}: {
+  length: number;
+  userId: string;
+}) {
+  const excludedWords = await getRecentUserWords({ length, userId });
+  const dailyWord = await getExistingDailyWord(length, todayKey());
+
+  if (dailyWord) {
+    excludedWords.add(dailyWord.normalizedWord);
+  }
+
+  return excludedWords;
+}
+
+async function getOrCreateDailyWord(length: number, date: string) {
+  const existing = await getExistingDailyWord(length, date);
+
   if (existing) {
     return existing;
   }
 
-  const generated = await generateFrenchWord(length, date);
+  const generated = pickLocalWord({
+    excludedWords: await getRecentDailyWords(length),
+    length,
+    seed: date,
+  });
   const [created] = await db
     .insert(wordGameDailyWord)
     .values({
@@ -266,7 +426,13 @@ export async function startGame({
   const generated =
     mode === "daily" && dailyDate
       ? await getOrCreateDailyWord(length, dailyDate)
-      : await generateFrenchWord(length);
+      : pickLocalWord({
+          excludedWords: await getFreeGameExcludedWords({
+            length,
+            userId,
+          }),
+          length,
+        });
 
   if (!generated) {
     throw new Error("Could not create a word for this game.");
@@ -383,6 +549,21 @@ export async function submitGuess({
 
   if (normalizedGuess.length !== game.length) {
     throw new Error(`Guess must be ${game.length} letters.`);
+  }
+
+  const [existingGuess] = await db
+    .select({ id: wordGameGuess.id })
+    .from(wordGameGuess)
+    .where(
+      and(
+        eq(wordGameGuess.gameId, game.id),
+        eq(wordGameGuess.normalizedGuess, normalizedGuess)
+      )
+    )
+    .limit(1);
+
+  if (existingGuess) {
+    throw new Error("Mot deja essaye.");
   }
 
   const position = game.attemptsUsed + 1;

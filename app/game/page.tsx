@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  BarChart3,
-  CalendarDays,
-  Play,
-  RotateCcw,
-  Trophy,
-} from "lucide-react";
+import { BarChart3, CalendarDays, Play, RotateCcw, Trophy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -141,6 +135,11 @@ export default function GamePage() {
   }>({ daily: [], global: [] });
 
   const rows = useMemo(() => emptyRows(game, guess), [game, guess]);
+  const attemptedGuesses = useMemo(
+    () =>
+      new Set(game?.guesses.map((item) => normalizeInput(item.guess)) ?? []),
+    [game?.guesses]
+  );
 
   const refreshMeta = useCallback(async () => {
     const [historyResponse, leaderboardResponse] = await Promise.all([
@@ -169,7 +168,7 @@ export default function GamePage() {
   const startNewGame = useCallback(
     async (nextMode: GameMode) => {
       setLoading(true);
-      setMessage("");
+      setMessage("Preparation du mot...");
       setGuess("");
 
       try {
@@ -189,10 +188,13 @@ export default function GamePage() {
         setMode(nextMode);
         if (data.game.status === "won") {
           setMessage("Mot du jour deja reussi.");
+          await refreshMeta();
         } else if (data.game.status === "lost") {
           setMessage(`Mot du jour termine. Le mot etait ${data.game.word}.`);
+          await refreshMeta();
+        } else {
+          setMessage("");
         }
-        await refreshMeta();
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Erreur reseau.");
       } finally {
@@ -252,6 +254,11 @@ export default function GamePage() {
     const cleanGuess = normalizeInput(guess);
     if (cleanGuess.length !== game.length) {
       setMessage(`Entre exactement ${game.length} lettres.`);
+      return;
+    }
+
+    if (attemptedGuesses.has(cleanGuess)) {
+      setMessage("Mot deja essaye.");
       return;
     }
 
@@ -396,7 +403,7 @@ export default function GamePage() {
                 </div>
               ) : (
                 <div className="flex min-h-[320px] w-full items-center justify-center border-y border-border text-muted-foreground">
-                  Lance une partie pour generer un mot avec Claude.
+                  Lance une partie pour generer un mot.
                 </div>
               )}
             </div>
@@ -415,7 +422,7 @@ export default function GamePage() {
                 disabled={game?.status !== "active" || loading}
                 type="submit"
               >
-                Valider
+                {loading ? "..." : "Valider"}
               </Button>
               <Button
                 disabled={loading}
