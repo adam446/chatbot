@@ -617,9 +617,9 @@ export async function POST(request: Request) {
         }
 
         const result = streamText({
-          activeTools:
-            (hasCurrentImageAttachment && !shouldUseImageToolPlanning) ||
-            (isReasoningModel && !supportsTools)
+          activeTools: shouldUseImageToolPlanning
+            ? ["createDocument"]
+            : hasCurrentImageAttachment || (isReasoningModel && !supportsTools)
               ? []
               : [
                   "searchDocuments",
@@ -670,7 +670,7 @@ export async function POST(request: Request) {
               openai: { reasoningEffort: modelConfig.reasoningEffort },
             }),
           },
-          stopWhen: isStepCount(5),
+          stopWhen: isStepCount(shouldUseImageToolPlanning ? 1 : 5),
           telemetry: {
             functionId: "stream-text",
             isEnabled: isProductionEnvironment,
