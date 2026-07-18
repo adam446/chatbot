@@ -8,9 +8,11 @@ const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 1024;
 const DEFAULT_CFG_SCALE = 5;
 const DEFAULT_IMAGE_TIMEOUT_MS = 45_000;
-const DEFAULT_IMAGE_EDIT_TIMEOUT_MS = 35_000;
+const DEFAULT_IMAGE_EDIT_TIMEOUT_MS = 25_000;
+const MAX_IMAGE_EDIT_TIMEOUT_MS = 45_000;
 const DEFAULT_SEED = 0;
 const DEFAULT_STEPS = 8;
+const DEFAULT_IMAGE_EDIT_SIZE = "512x512";
 const DEFAULT_DEEPINFRA_IMAGE_EDIT_URL =
   "https://api.deepinfra.com/v1/openai/images/edits";
 const DEEPINFRA_IMAGE_EDIT_MODEL_ALIASES: Record<string, string> = {
@@ -206,11 +208,7 @@ function buildDeepInfraImageEditBody({
   body.append("n", "1");
   body.append(
     "size",
-    process.env.NVIDIA_IMAGE_EDIT_SIZE ??
-      `${getNumberEnv("NVIDIA_IMAGE_WIDTH", DEFAULT_WIDTH)}x${getNumberEnv(
-        "NVIDIA_IMAGE_HEIGHT",
-        DEFAULT_HEIGHT
-      )}`
+    process.env.NVIDIA_IMAGE_EDIT_SIZE ?? DEFAULT_IMAGE_EDIT_SIZE
   );
 
   return body;
@@ -218,9 +216,12 @@ function buildDeepInfraImageEditBody({
 
 function getImageTimeoutMs(hasSourceImage = false) {
   if (hasSourceImage) {
-    return getNumberEnv(
-      "NVIDIA_IMAGE_EDIT_TIMEOUT_MS",
-      getNumberEnv("NVIDIA_IMAGE_TIMEOUT_MS", DEFAULT_IMAGE_EDIT_TIMEOUT_MS)
+    return Math.min(
+      getNumberEnv(
+        "NVIDIA_IMAGE_EDIT_TIMEOUT_MS",
+        DEFAULT_IMAGE_EDIT_TIMEOUT_MS
+      ),
+      MAX_IMAGE_EDIT_TIMEOUT_MS
     );
   }
 
