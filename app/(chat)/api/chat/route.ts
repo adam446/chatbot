@@ -196,7 +196,7 @@ function isImageCreationOrEditRequest(text: string) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
-  return /\b(create|generate|make|draw|edit|modify|replace|change|transform|restyle|swap|add|remove|cree|creer|genere|generer|modifie|modifier|remplace|remplacer|change|transforme|ajoute|ajouter|enleve|enlever)\b/.test(
+  return /\b(create|generate|regenerate|make|draw|edit|modify|replace|change|transform|restyle|swap|add|remove|cree|creer|genere|generer|regenere|regenerer|modifie|modifier|remplace|remplacer|change|transforme|ajoute|ajouter|enleve|enlever)\b/.test(
     normalized
   );
 }
@@ -717,7 +717,7 @@ export async function POST(request: Request) {
         const imageToolInstructions = shouldUseImageToolPlanning
           ? '\n\nThe current user message includes an uploaded image and asks to create or modify an image. You MUST call createDocument exactly once with kind "image". Use a short display title, and put the user\'s complete requested transformation in the prompt field. The prompt must explicitly preserve the source image subject identity, face, pose, framing, background, line art/style, and original colors unless the user asked to change them. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
           : shouldUpdateExistingImageArtifact && latestImageDocument
-            ? `\n\nThe current user message asks to modify the existing image artifact titled "${latestImageDocument.title}". You MUST call updateDocument exactly once with id "${latestImageDocument.id}" and description equal to the user's full request. Do not call createDocument. Preserve the current image subject identity, face, pose, framing, background, line art/style, and original colors unless the user explicitly asks to change them. If the requested visual change is unclear, ask one concise clarification question instead of creating a new image.`
+            ? `\n\nThe current user message asks to modify the existing image artifact titled "${latestImageDocument.title}". You MUST call updateDocument exactly once with id "${latestImageDocument.id}" and description equal to the user's full request. Do not call createDocument. The server will pass the existing artifact image as the source image; treat it as the visual reference to edit, not as text-only context. Preserve the current image subject identity, face, pose, framing, background, line art/style, and original colors unless the user explicitly asks to change them. If the requested visual change is unclear, ask one concise clarification question instead of creating a new image.`
             : shouldCreateImageArtifact
               ? '\n\nThe current user message asks to generate an image artifact. You MUST call createDocument exactly once with kind "image". Use a short display title, and put the user\'s complete image request in the prompt field. If server-side search results are present, use them only as context to enrich the image prompt; do not answer with search text instead of creating the image. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
               : "";
@@ -784,7 +784,11 @@ export async function POST(request: Request) {
           },
           onEnd() {
             stopWaitingStatus();
-            if (fallbackVerifiedAnswer && !hasAssistantText) {
+            if (
+              fallbackVerifiedAnswer &&
+              !shouldUseImageArtifactTool &&
+              !hasAssistantText
+            ) {
               writeAssistantTextFallback({
                 dataStream,
                 text: fallbackVerifiedAnswer,
