@@ -52,7 +52,6 @@ export async function POST(request: Request) {
     const filename = (formData.get("file") as File).name;
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
     const pathname = `attachments/${session.user.id}/${Date.now()}-${safeName}`;
-    const fileBuffer = await file.arrayBuffer();
 
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json(
@@ -62,7 +61,7 @@ export async function POST(request: Request) {
     }
 
     try {
-      const data = await put(pathname, fileBuffer, {
+      const data = await put(pathname, file, {
         access: "private",
         contentType: file.type,
       });
