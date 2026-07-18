@@ -3,12 +3,15 @@ import { z } from "zod";
 
 const DEFAULT_IMAGE_MODEL = "black-forest-labs/flux.1-dev";
 const DEFAULT_IMAGE_EDIT_MODEL = "qwen/qwen-image-edit-2511";
+const DEFAULT_DEEPINFRA_IMAGE_EDIT_MODEL = "Qwen/Qwen-Image-Edit";
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 1024;
 const DEFAULT_CFG_SCALE = 5;
 const DEFAULT_IMAGE_TIMEOUT_MS = 45_000;
 const DEFAULT_SEED = 0;
 const DEFAULT_STEPS = 8;
+const DEFAULT_DEEPINFRA_IMAGE_EDIT_URL =
+  "https://api.deepinfra.com/v1/openai/images/edits";
 
 type NvidiaImageRequest = {
   prompt: string;
@@ -22,11 +25,27 @@ function getImageModel() {
   return process.env.NVIDIA_IMAGE_MODEL ?? DEFAULT_IMAGE_MODEL;
 }
 
+function getImageEditProvider() {
+  return process.env.NVIDIA_IMAGE_EDIT_PROVIDER?.toLowerCase();
+}
+
 function getImageEditModel() {
+  if (getImageEditProvider() === "deepinfra") {
+    return (
+      process.env.NVIDIA_IMAGE_EDIT_MODEL ?? DEFAULT_DEEPINFRA_IMAGE_EDIT_MODEL
+    );
+  }
+
   return process.env.NVIDIA_IMAGE_EDIT_MODEL ?? DEFAULT_IMAGE_EDIT_MODEL;
 }
 
 function getImageApiUrl(hasSourceImage: boolean) {
+  if (hasSourceImage && getImageEditProvider() === "deepinfra") {
+    return (
+      process.env.NVIDIA_IMAGE_EDIT_API_URL ?? DEFAULT_DEEPINFRA_IMAGE_EDIT_URL
+    );
+  }
+
   if (hasSourceImage && process.env.NVIDIA_IMAGE_EDIT_API_URL) {
     return process.env.NVIDIA_IMAGE_EDIT_API_URL;
   }
@@ -43,6 +62,14 @@ function getImageApiUrl(hasSourceImage: boolean) {
 function getNumberEnv(name: string, fallback: number) {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function getImageApiKey(hasSourceImage: boolean) {
+  if (hasSourceImage) {
+    return process.env.NVIDIA_IMAGE_EDIT_API_KEY ?? process.env.NVIDIA_API_KEY;
+  }
+
+  return process.env.NVIDIA_API_KEY;
 }
 
 function stripDataUrlPrefix(value: string) {
@@ -139,6 +166,41 @@ function buildPayload({
   payload.mode = "base";
 
   return payload;
+}
+
+function buildDeepInfraImageEditBody({
+  prompt,
+  sourceImageBase64,
+  sourceImageMimeType,
+}: NvidiaImageRequest) {
+  if (!sourceImageBase64) {
+    throw new Error("DeepInfra image editing requires a source image");
+  }
+
+  const imageBuffer = Buffer.from(sourceImageBase64, "base64");
+  const body = new FormData();
+  const mimeType = sourceImageMimeType ?? "image/png";
+  const extension =
+    mimeType === "image/jpeg" ? "jpg" : mimeType.replace("image/", "");
+
+  body.append(
+    "image",
+    new Blob([imageBuffer], { type: mimeType }),
+    `source.${extension}`
+  );
+  body.append("prompt", prompt);
+  body.append("model", getImageEditModel());
+  body.append("n", "1");
+  body.append(
+    "size",
+    process.env.NVIDIA_IMAGE_EDIT_SIZE ??
+      `${getNumberEnv("NVIDIA_IMAGE_WIDTH", DEFAULT_WIDTH)}x${getNumberEnv(
+        "NVIDIA_IMAGE_HEIGHT",
+        DEFAULT_HEIGHT
+      )}`
+  );
+
+  return body;
 }
 
 function getImageTimeoutMs() {
@@ -244,12 +306,19 @@ export async function generateNvidiaImage({
   sourceImageBase64,
   sourceImageMimeType,
 }: NvidiaImageRequest) {
-  if (!process.env.NVIDIA_API_KEY) {
-    throw new Error("NVIDIA_API_KEY is required for image generation");
+  const hasSourceImage = Boolean(sourceImageBase64);
+  const apiKey = getImageApiKey(hasSourceImage);
+  if (!apiKey) {
+    throw new Error(
+      hasSourceImage
+        ? "NVIDIA_IMAGE_EDIT_API_KEY or NVIDIA_API_KEY is required for image editing"
+        : "NVIDIA_API_KEY is required for image generation"
+    );
   }
 
   if (
     sourceImageBase64 &&
+    getImageEditProvider() !== "deepinfra" &&
     !(process.env.NVIDIA_IMAGE_EDIT_API_URL || process.env.NVIDIA_IMAGE_API_URL)
   ) {
     throw new Error(
@@ -259,18 +328,34 @@ export async function generateNvidiaImage({
 
   let response: Response;
   try {
-    response = await fetch(getImageApiUrl(Boolean(sourceImageBase64)), {
-      body: JSON.stringify(
-        buildPayload({ prompt, sourceImageBase64, sourceImageMimeType })
-      ),
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-      signal: AbortSignal.timeout(getImageTimeoutMs()),
-    });
+    if (sourceImageBase64 && getImageEditProvider() === "deepinfra") {
+      response = await fetch(getImageApiUrl(true), {
+        body: buildDeepInfraImageEditBody({
+          prompt,
+          sourceImageBase64,
+          sourceImageMimeType,
+        }),
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(getImageTimeoutMs()),
+      });
+    } else {
+      response = await fetch(getImageApiUrl(hasSourceImage), {
+        body: JSON.stringify(
+          buildPayload({ prompt, sourceImageBase64, sourceImageMimeType })
+        ),
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(getImageTimeoutMs()),
+      });
+    }
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") {
       throw new Error(
