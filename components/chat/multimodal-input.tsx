@@ -413,7 +413,7 @@ function PureMultimodalInput({
 
       if (response.ok) {
         const data = await response.json();
-        const { contentType, pathname, url, verified } = data;
+        const { contentType, filename, pathname, url, verified } = data;
 
         if (!verified) {
           toast.error("Upload was not verified by storage");
@@ -422,7 +422,7 @@ function PureMultimodalInput({
 
         return {
           contentType,
-          name: pathname,
+          name: filename ?? pathname,
           url,
         };
       }
