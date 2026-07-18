@@ -27,8 +27,23 @@ export const createDocument = ({
   tool({
     description:
       "Create an artifact through this tool call only. Never write createDocument, JSON, or pseudo-code in chat. You MUST specify kind: use 'code' for any programming/algorithm request (creates a script), 'text' for essays/writing (creates a document), 'sheet' for spreadsheets/data, 'image' for image generation or editing from an uploaded image. Image requests always run server-side NVIDIA safety before generation.",
-    execute: async ({ title, kind, prompt, sourceImageUrl }) => {
+    execute: async ({
+      title,
+      kind,
+      prompt,
+      sourceImageUrl,
+      referenceImageUrl,
+      style,
+      negativePrompt,
+    }) => {
       const id = generateUUID();
+      const imagePromptParts = [
+        prompt ?? sourceImagePrompt,
+        style ? `Style: ${style}` : null,
+        negativePrompt ? `Avoid: ${negativePrompt}` : null,
+      ].filter(Boolean);
+      const imagePrompt =
+        kind === "image" ? imagePromptParts.join("\n") || undefined : undefined;
 
       dataStream.write({
         data: kind,
@@ -68,11 +83,14 @@ export const createDocument = ({
           dataStream,
           id,
           modelId,
-          prompt: kind === "image" ? (prompt ?? sourceImagePrompt) : undefined,
+          prompt: imagePrompt,
           session,
           sourceImageUrl:
             kind === "image"
-              ? (sourceImageUrls.at(-1) ?? sourceImageUrl)
+              ? (sourceImageUrls.at(-1) ??
+                sourceImageUrl ??
+                referenceImageUrl ??
+                undefined)
               : undefined,
           title,
         });
@@ -126,6 +144,13 @@ export const createDocument = ({
         .describe(
           "REQUIRED. 'code' for programming/algorithms, 'text' for essays/writing, 'sheet' for spreadsheets, 'image' for image generation or image editing"
         ),
+      negativePrompt: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Optional image constraints to avoid. The server folds this into the final prompt because not all image providers support a separate negative prompt field."
+        ),
       prompt: z
         .string()
         .min(1)
@@ -133,12 +158,27 @@ export const createDocument = ({
         .describe(
           "For image artifacts, the full generation/edit instruction. Use the user's exact requested transformation, including constraints like preserving identity, face, pose, background, style, and original colors."
         ),
+      referenceImageUrl: z
+        .string()
+        .min(1)
+        .nullable()
+        .optional()
+        .describe(
+          "Optional alias for sourceImageUrl. Use only when the user provides a reference image URL and there is no uploaded image."
+        ),
       sourceImageUrl: z
         .string()
         .min(1)
         .optional()
         .describe(
           "Optional. For editing an uploaded PNG/JPEG, pass the attachment URL from the user's message. Leave empty for text-to-image generation."
+        ),
+      style: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Optional image style constraint, such as photorealistic, cinematic, pencil sketch, or product render."
         ),
       title: z.string().describe("The title of the artifact"),
     }),
