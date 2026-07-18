@@ -396,6 +396,7 @@ export async function POST(request: Request) {
             typeof part.url === "string"
         )
         .map((part) => part.url) ?? [];
+    const hasCurrentImageAttachment = currentImageAttachmentUrls.length > 0;
     const searchQuery = getSearchQuery(message as ChatMessage | undefined);
     const automaticSearchMode = getAutomaticSearchMode(searchQuery);
     const effectiveSearchMode =
@@ -556,7 +557,7 @@ export async function POST(request: Request) {
 
         const result = streamText({
           activeTools:
-            isReasoningModel && !supportsTools
+            hasCurrentImageAttachment || (isReasoningModel && !supportsTools)
               ? []
               : [
                   "searchDocuments",
@@ -595,8 +596,9 @@ export async function POST(request: Request) {
               });
             }
           },
-          onError() {
+          onError({ error }) {
             stopWaitingStatus();
+            console.error("[chat] streamText failed", error);
           },
           providerOptions: {
             ...(modelConfig?.gatewayOrder && {
@@ -695,6 +697,7 @@ export async function POST(request: Request) {
         }
       },
       onError: (error) => {
+        console.error("[chat] UI stream failed", error);
         if (
           error instanceof Error &&
           error.message?.includes(
