@@ -73,14 +73,19 @@ function buildImagePrompt({
   mode: "create" | "edit";
   prompt: string;
 }) {
+  const qualityGuardrails =
+    "Use normal exposure, clear subject framing, sharp visible details, and a complete rendered scene. Avoid blur, low quality, pixelation, over-dark exposure, blank backgrounds unless explicitly requested, black frames, transparent frames, masks, alpha maps, and empty outputs.";
+
   if (mode === "create") {
-    return `${prompt}\n\nGenerate a complete, visible, non-empty image. Do not generate a blank, solid black, transparent, mask-only, or alpha-only output.`;
+    return `${prompt}\n\n${qualityGuardrails}`;
   }
 
   return `User requested image edit:
 ${prompt}
 
-Use the provided source image as the visual base. Edit that source image directly; do not invent a different subject or replace it from memory. Preserve the same subject identity, face, pose, framing, background, line art, visual style, and original colors unless the user explicitly asked to change one of those. Change only the requested elements. Return a complete visible image, not a mask, not an alpha map, not a blank frame, and not a solid black image.`;
+Use the provided source image as the visual base. Edit that source image directly; do not invent a different subject or replace it from memory. Preserve the same subject identity, face, pose, framing, background, line art, visual style, and original colors unless the user explicitly asked to change one of those. Change only the requested elements.
+
+${qualityGuardrails}`;
 }
 
 export const imageDocumentHandler = createDocumentHandler<"image">({

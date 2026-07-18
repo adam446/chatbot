@@ -185,9 +185,156 @@ function hydratePrivateAttachmentsForModel({
   );
 }
 
-function getSearchQuery(message?: ChatMessage) {
-  const text = message ? getTextFromMessage(message).trim() : "";
-  return text.slice(0, 500);
+type ImageRequestSpec = {
+  normalizedText: string;
+  referenceImageUrl?: string;
+  toolPrompt: string;
+};
+
+function getOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function extractFirstJsonObject(text: string) {
+  const start = text.indexOf("{");
+  if (start === -1) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeImageRequestSpec(text: string): ImageRequestSpec | null {
+  const jsonText = extractFirstJsonObject(text);
+  if (!jsonText) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+
+  const record = asRecord(parsed);
+  if (!record) {
+    return null;
+  }
+
+  // Some clients serialize image tool calls with `content` instead of `prompt`.
+  // Normalize both shapes before deciding whether to force the image artifact.
+  const prompt = getOptionalString(
+    record.prompt ?? record.description ?? record.content
+  );
+  const style = getOptionalString(record.style);
+  const negativePrompt = getOptionalString(
+    record.negativePrompt ?? record.negative_prompt
+  );
+  const sourceImageUrl = getOptionalString(record.sourceImageUrl);
+  const referenceImageUrl = getOptionalString(record.referenceImageUrl);
+  const kind = getOptionalString(record.kind);
+  const prefix = text.slice(0, text.indexOf(jsonText));
+  const imageIntentText = `${prefix} ${kind ?? ""} ${prompt ?? ""} ${
+    style ?? ""
+  }`.toLowerCase();
+
+  const hasImageIntent =
+    /\b(image|photo|picture|mug\s*shot|portrait|avatar|poster|illustration|dessin|visuel|photorealistic|photorealiste)\b/.test(
+      imageIntentText
+    ) ||
+    /generateimage|imagewithreference|createimage|editimage/.test(
+      imageIntentText.replace(/\s+/g, "")
+    );
+
+  if (!prompt || !hasImageIntent) {
+    return null;
+  }
+
+  const promptParts = [`Image request: ${prompt}`];
+  if (style) {
+    promptParts.push(`Style: ${style}`);
+  }
+  if (negativePrompt) {
+    promptParts.push(`Avoid: ${negativePrompt}`);
+  }
+  if (sourceImageUrl ?? referenceImageUrl) {
+    promptParts.push(
+      `Reference image URL: ${sourceImageUrl ?? referenceImageUrl}`
+    );
+  }
+
+  return {
+    normalizedText: promptParts.join("\n"),
+    referenceImageUrl: sourceImageUrl ?? referenceImageUrl,
+    toolPrompt: promptParts.join("\n"),
+  };
+}
+
+function replaceLatestUserTextMessage({
+  messages,
+  text,
+}: {
+  messages: ChatMessage[];
+  text: string;
+}) {
+  const latestIndex = messages.length - 1;
+
+  return messages.map((msg, index) => {
+    if (index !== latestIndex || msg.role !== "user") {
+      return msg;
+    }
+
+    let replacedText = false;
+    const parts = msg.parts.map((part) => {
+      if (part.type !== "text" || replacedText) {
+        return part;
+      }
+      replacedText = true;
+      return { ...part, text };
+    });
+
+    return {
+      ...msg,
+      parts: replacedText ? parts : [{ text, type: "text" as const }, ...parts],
+    };
+  });
 }
 
 function isImageCreationOrEditRequest(text: string) {
@@ -196,7 +343,7 @@ function isImageCreationOrEditRequest(text: string) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
-  return /\b(create|generate|regenerate|make|draw|edit|modify|replace|change|transform|restyle|swap|add|remove|cree|creer|genere|generer|regenere|regenerer|modifie|modifier|remplace|remplacer|change|transforme|ajoute|ajouter|enleve|enlever)\b/.test(
+  return /\b(create|generate|regenerate|make|draw|edit|modify|replace|change|transform|restyle|swap|add|remove|cree|creer|genere|generer|regenere|regenerer|modifie|modifier|remplace|remplacer|change|transforme|ajoute|ajouter|enleve|enlever|fais|fait)\b/.test(
     normalized
   );
 }
@@ -209,7 +356,7 @@ function isExplicitImageArtifactRequest(text: string) {
 
   return (
     isImageCreationOrEditRequest(text) &&
-    /\b(image|picture|photo|illustration|drawing|dessin|visuel|visual|poster|affiche|logo|avatar)\b/.test(
+    /\b(image|picture|photo|illustration|drawing|dessin|visuel|visual|poster|affiche|logo|avatar|mug\s*shot|portrait)\b/.test(
       normalized
     )
   );
@@ -548,7 +695,14 @@ export async function POST(request: Request) {
         )
         .map((part) => part.url) ?? [];
     const hasCurrentImageAttachment = currentImageAttachmentUrls.length > 0;
-    const searchQuery = getSearchQuery(message as ChatMessage | undefined);
+    const rawMessageText =
+      message?.role === "user"
+        ? getTextFromMessage(message as ChatMessage).trim()
+        : "";
+    const rawSearchQuery = rawMessageText.slice(0, 500);
+    const normalizedImageRequest = normalizeImageRequestSpec(rawMessageText);
+    const searchQuery =
+      normalizedImageRequest?.normalizedText ?? rawSearchQuery;
     const shouldUseImageToolPlanning =
       hasCurrentImageAttachment && isImageCreationOrEditRequest(searchQuery);
     const latestImageDocument = getLatestImageDocumentReference(uiMessages);
@@ -562,22 +716,38 @@ export async function POST(request: Request) {
       !shouldUseImageToolPlanning &&
       !shouldUpdateExistingImageArtifact &&
       !hasCurrentImageAttachment &&
-      isExplicitImageArtifactRequest(searchQuery);
+      (Boolean(normalizedImageRequest) ||
+        isExplicitImageArtifactRequest(searchQuery));
     const shouldUseImageArtifactTool =
       shouldUseImageToolPlanning ||
       shouldUpdateExistingImageArtifact ||
       shouldCreateImageArtifact;
+    const uiMessagesForModel = normalizedImageRequest
+      ? replaceLatestUserTextMessage({
+          messages: uiMessages,
+          text: normalizedImageRequest.normalizedText,
+        })
+      : uiMessages;
     const messagesForModel = shouldUseImageToolPlanning
-      ? stripImageAttachmentsForToolPlanning(uiMessages)
-      : stripNonLatestImageAttachments(uiMessages);
+      ? stripImageAttachmentsForToolPlanning(uiMessagesForModel)
+      : stripNonLatestImageAttachments(uiMessagesForModel);
     const hydratedMessages = await hydratePrivateAttachmentsForModel({
       messages: messagesForModel,
       userId: session.user.id,
     });
     const modelMessages = await convertToModelMessages(hydratedMessages);
     const automaticSearchMode = getAutomaticSearchMode(searchQuery);
-    const effectiveSearchMode =
-      searchMode === "off" ? automaticSearchMode : searchMode;
+    const effectiveSearchMode = shouldUseImageArtifactTool
+      ? "off"
+      : searchMode === "off"
+        ? automaticSearchMode
+        : searchMode;
+    const imageSourceUrls =
+      currentImageAttachmentUrls.length > 0
+        ? currentImageAttachmentUrls
+        : normalizedImageRequest?.referenceImageUrl
+          ? [normalizedImageRequest.referenceImageUrl]
+          : [];
 
     console.log("[chat] request", {
       automaticSearchMode,
@@ -586,6 +756,7 @@ export async function POST(request: Request) {
       hasCurrentImageAttachment,
       hasMessage: Boolean(message),
       hasSearchQuery: Boolean(searchQuery),
+      hasStructuredImageRequest: Boolean(normalizedImageRequest),
       latestImageDocumentId: latestImageDocument?.id ?? null,
       searchMode,
       shouldCreateImageArtifact,
@@ -824,10 +995,10 @@ export async function POST(request: Request) {
               dataStream,
               modelId: chatModel,
               session,
-              sourceImagePrompt: shouldUseImageToolPlanning
-                ? searchQuery
-                : undefined,
-              sourceImageUrls: currentImageAttachmentUrls,
+              sourceImagePrompt:
+                normalizedImageRequest?.toolPrompt ??
+                (shouldUseImageToolPlanning ? searchQuery : undefined),
+              sourceImageUrls: imageSourceUrls,
             }),
             editDocument: editDocument({ dataStream, session }),
             getWeather,
