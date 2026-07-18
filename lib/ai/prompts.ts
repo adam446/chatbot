@@ -14,7 +14,7 @@ CRITICAL RULES:
 - When the user asks to generate or create an image
 - When the user uploads an image and asks to transform, restyle, or modify it
 - You MUST specify kind: 'code' for programming, 'text' for writing, 'sheet' for data, 'image' for image generation/editing
-- For image editing from an uploaded image, pass the uploaded image URL as sourceImageUrl
+- For image editing from an uploaded image, use kind: 'image'. The server automatically uses the uploaded image attachment when available; sourceImageUrl is optional.
 - Include ALL content in the createDocument call. Do not create then edit.
 
 **When NOT to use \`createDocument\`:**
