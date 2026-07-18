@@ -2,7 +2,7 @@ import { get } from "@vercel/blob";
 import { z } from "zod";
 
 const DEFAULT_IMAGE_MODEL = "black-forest-labs/flux.1-dev";
-const DEFAULT_IMAGE_EDIT_MODEL = "black-forest-labs/flux.1-kontext-dev";
+const DEFAULT_IMAGE_EDIT_MODEL = "qwen/qwen-image-edit-2511";
 const DEFAULT_WIDTH = 1024;
 const DEFAULT_HEIGHT = 1024;
 const DEFAULT_CFG_SCALE = 5;
@@ -109,6 +109,20 @@ function buildPayload({
   sourceImageBase64,
   sourceImageMimeType,
 }: NvidiaImageRequest) {
+  if (sourceImageBase64) {
+    const payload: Record<string, unknown> = {
+      image: `data:${sourceImageMimeType ?? "image/png"};base64,${sourceImageBase64}`,
+      prompt,
+      seed: getNumberEnv("NVIDIA_IMAGE_SEED", DEFAULT_SEED),
+    };
+
+    if (process.env.NVIDIA_IMAGE_INCLUDE_MODEL === "1") {
+      payload.model = getImageEditModel();
+    }
+
+    return payload;
+  }
+
   const payload: Record<string, unknown> = {
     cfg_scale: getNumberEnv("NVIDIA_IMAGE_CFG_SCALE", DEFAULT_CFG_SCALE),
     height: getNumberEnv("NVIDIA_IMAGE_HEIGHT", DEFAULT_HEIGHT),
@@ -120,14 +134,9 @@ function buildPayload({
   };
 
   if (process.env.NVIDIA_IMAGE_INCLUDE_MODEL === "1") {
-    payload.model = sourceImageBase64 ? getImageEditModel() : getImageModel();
+    payload.model = getImageModel();
   }
-
-  if (sourceImageBase64) {
-    payload.image = `data:${sourceImageMimeType ?? "image/png"};base64,${sourceImageBase64}`;
-  } else {
-    payload.mode = "base";
-  }
+  payload.mode = "base";
 
   return payload;
 }
@@ -237,6 +246,15 @@ export async function generateNvidiaImage({
 }: NvidiaImageRequest) {
   if (!process.env.NVIDIA_API_KEY) {
     throw new Error("NVIDIA_API_KEY is required for image generation");
+  }
+
+  if (
+    sourceImageBase64 &&
+    !(process.env.NVIDIA_IMAGE_EDIT_API_URL || process.env.NVIDIA_IMAGE_API_URL)
+  ) {
+    throw new Error(
+      "NVIDIA hosted image generation does not support arbitrary uploaded source images. Configure NVIDIA_IMAGE_EDIT_API_URL for a self-hosted image-edit NIM before enabling source edits."
+    );
   }
 
   let response: Response;

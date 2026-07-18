@@ -5,6 +5,10 @@ import {
 import { fetchImageAsBase64, generateNvidiaImage } from "@/lib/ai/nvidia-image";
 import { createDocumentHandler } from "@/lib/artifacts/server";
 
+function canSendSourceImageToNvidia() {
+  return process.env.NVIDIA_IMAGE_ENABLE_SOURCE_EDIT === "1";
+}
+
 export const imageDocumentHandler = createDocumentHandler<"image">({
   kind: "image",
   onCreateDocument: async ({ title, dataStream, sourceImageUrl }) => {
@@ -21,11 +25,17 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     const sourceImage = sourceImageUrl
       ? await fetchImageAsBase64(sourceImageUrl)
       : null;
+    const sendSourceImage = Boolean(
+      sourceImage && canSendSourceImageToNvidia()
+    );
 
     const image = await generateNvidiaImage({
-      prompt: title,
-      sourceImageBase64: sourceImage?.base64,
-      sourceImageMimeType: sourceImage?.mimeType,
+      prompt:
+        sourceImage && !sendSourceImage
+          ? `${title}. Create a new image inspired by the uploaded reference image.`
+          : title,
+      sourceImageBase64: sendSourceImage ? sourceImage?.base64 : undefined,
+      sourceImageMimeType: sendSourceImage ? sourceImage?.mimeType : undefined,
     });
 
     dataStream.write({
@@ -47,10 +57,13 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
       throw new ImageSafetyBlockError(safety);
     }
 
+    const sendSourceImage = canSendSourceImageToNvidia();
     const image = await generateNvidiaImage({
       prompt: description,
-      sourceImageBase64: document.content ?? undefined,
-      sourceImageMimeType: "image/png",
+      sourceImageBase64: sendSourceImage
+        ? (document.content ?? undefined)
+        : undefined,
+      sourceImageMimeType: sendSourceImage ? "image/png" : undefined,
     });
 
     dataStream.write({
