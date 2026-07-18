@@ -189,6 +189,18 @@ type ImageRequestSpec = {
   toolPrompt: string;
 };
 
+type ResolvedImageContext = {
+  artifactId?: string;
+  promptPrefix: string;
+  source:
+    | "current-upload"
+    | "none"
+    | "previous-artifact"
+    | "previous-upload"
+    | "reference-url";
+  urls: string[];
+};
+
 function getOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -371,6 +383,43 @@ function asksForNewImageArtifact(text: string) {
   );
 }
 
+function getImageAttachmentUrlsFromMessage(message: ChatMessage) {
+  return message.parts
+    .filter(
+      (
+        part
+      ): part is typeof part & {
+        mediaType: string;
+        type: "file";
+        url: string;
+      } =>
+        part.type === "file" &&
+        "mediaType" in part &&
+        typeof part.mediaType === "string" &&
+        part.mediaType.startsWith("image/") &&
+        "url" in part &&
+        typeof part.url === "string"
+    )
+    .map((part) => part.url);
+}
+
+function getLatestPreviousImageAttachmentUrls(messages: ChatMessage[]) {
+  const previousMessages = messages.slice(0, -1);
+
+  for (const msg of [...previousMessages].reverse()) {
+    if (msg.role !== "user") {
+      continue;
+    }
+
+    const urls = getImageAttachmentUrlsFromMessage(msg);
+    if (urls.length > 0) {
+      return urls;
+    }
+  }
+
+  return [];
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
@@ -426,6 +475,74 @@ function getLatestImageDocumentReference(messages: ChatMessage[]) {
   }
 
   return null;
+}
+
+function resolveImageContext({
+  currentImageAttachmentUrls,
+  latestImageDocument,
+  normalizedImageRequest,
+  searchQuery,
+  uiMessages,
+}: {
+  currentImageAttachmentUrls: string[];
+  latestImageDocument: ReturnType<typeof getLatestImageDocumentReference>;
+  normalizedImageRequest: ImageRequestSpec | null;
+  searchQuery: string;
+  uiMessages: ChatMessage[];
+}): ResolvedImageContext {
+  if (currentImageAttachmentUrls.length > 0) {
+    return {
+      promptPrefix:
+        "Use the image uploaded in the current user message as the visual source. Fit the output to that uploaded image's subject, framing, composition, aspect ratio, and visual style unless the user explicitly asks to change them.",
+      source: "current-upload",
+      urls: currentImageAttachmentUrls,
+    };
+  }
+
+  if (normalizedImageRequest?.referenceImageUrl) {
+    return {
+      promptPrefix:
+        "Use the provided reference image URL as the visual source. Fit the output to the reference image's subject, framing, composition, aspect ratio, and visual style unless the user explicitly asks to change them.",
+      source: "reference-url",
+      urls: [normalizedImageRequest.referenceImageUrl],
+    };
+  }
+
+  if (
+    latestImageDocument &&
+    (isImageCreationOrEditRequest(searchQuery) ||
+      isExplicitImageArtifactRequest(`generate image ${searchQuery}`)) &&
+    !asksForNewImageArtifact(searchQuery)
+  ) {
+    return {
+      artifactId: latestImageDocument.id,
+      promptPrefix:
+        "Use the existing image artifact as the visual source. Preserve its subject, framing, composition, aspect ratio, and style unless the user explicitly asks to change them.",
+      source: "previous-artifact",
+      urls: [],
+    };
+  }
+
+  const previousUploadUrls = getLatestPreviousImageAttachmentUrls(uiMessages);
+  if (
+    previousUploadUrls.length > 0 &&
+    (isImageCreationOrEditRequest(searchQuery) ||
+      isExplicitImageArtifactRequest(`generate image ${searchQuery}`))
+  ) {
+    return {
+      promptPrefix:
+        "Use the most recent previous uploaded image in this chat as the visual reference. Fit the output to that uploaded image's subject, framing, composition, aspect ratio, and visual style unless the user explicitly asks to change them.",
+      source: "previous-upload",
+      urls: previousUploadUrls,
+    };
+  }
+
+  return {
+    promptPrefix:
+      "No source image is available. Generate from the text prompt only.",
+    source: "none",
+    urls: [],
+  };
 }
 
 function stripImageAttachmentsForToolPlanning(messages: ChatMessage[]) {
@@ -689,23 +806,9 @@ export async function POST(request: Request) {
     const supportsTools = capabilities?.tools === true;
 
     const currentImageAttachmentUrls =
-      message?.parts
-        .filter(
-          (
-            part
-          ): part is typeof part & {
-            mediaType: string;
-            type: "file";
-            url: string;
-          } =>
-            part.type === "file" &&
-            "mediaType" in part &&
-            typeof part.mediaType === "string" &&
-            part.mediaType.startsWith("image/") &&
-            "url" in part &&
-            typeof part.url === "string"
-        )
-        .map((part) => part.url) ?? [];
+      message?.role === "user"
+        ? getImageAttachmentUrlsFromMessage(message as ChatMessage)
+        : [];
     const hasCurrentImageAttachment = currentImageAttachmentUrls.length > 0;
     const rawMessageText =
       message?.role === "user"
@@ -716,28 +819,46 @@ export async function POST(request: Request) {
     const searchQuery =
       normalizedImageRequest?.normalizedText ?? rawSearchQuery;
     const shouldUseImageToolPlanning =
-      hasCurrentImageAttachment && isImageCreationOrEditRequest(searchQuery);
+      hasCurrentImageAttachment &&
+      (isImageCreationOrEditRequest(searchQuery) ||
+        isExplicitImageArtifactRequest(`generate image ${searchQuery}`) ||
+        Boolean(normalizedImageRequest));
     const latestImageDocument = getLatestImageDocumentReference(uiMessages);
+    const imageContext = resolveImageContext({
+      currentImageAttachmentUrls,
+      latestImageDocument,
+      normalizedImageRequest,
+      searchQuery,
+      uiMessages,
+    });
     const shouldUpdateExistingImageArtifact =
       !shouldUseImageToolPlanning &&
       !hasCurrentImageAttachment &&
       Boolean(latestImageDocument) &&
-      isImageCreationOrEditRequest(searchQuery) &&
+      imageContext.source === "previous-artifact" &&
       !asksForNewImageArtifact(searchQuery);
     const shouldCreateImageArtifact =
       !shouldUseImageToolPlanning &&
       !shouldUpdateExistingImageArtifact &&
       !hasCurrentImageAttachment &&
       (Boolean(normalizedImageRequest) ||
+        imageContext.source === "previous-upload" ||
+        imageContext.source === "reference-url" ||
         isExplicitImageArtifactRequest(searchQuery));
     const shouldUseImageArtifactTool =
       shouldUseImageToolPlanning ||
       shouldUpdateExistingImageArtifact ||
       shouldCreateImageArtifact;
+    const contextualImagePrompt =
+      shouldUseImageArtifactTool && imageContext.source !== "none"
+        ? `${imageContext.promptPrefix}\n\nUser request:\n${
+            normalizedImageRequest?.toolPrompt ?? searchQuery
+          }`
+        : (normalizedImageRequest?.toolPrompt ?? searchQuery);
     const uiMessagesForModel = normalizedImageRequest
       ? replaceLatestUserTextMessage({
           messages: uiMessages,
-          text: normalizedImageRequest.normalizedText,
+          text: contextualImagePrompt,
         })
       : uiMessages;
     const messagesForModel = shouldUseImageToolPlanning
@@ -754,12 +875,7 @@ export async function POST(request: Request) {
       : searchMode === "off"
         ? automaticSearchMode
         : searchMode;
-    const imageSourceUrls =
-      currentImageAttachmentUrls.length > 0
-        ? currentImageAttachmentUrls
-        : normalizedImageRequest?.referenceImageUrl
-          ? [normalizedImageRequest.referenceImageUrl]
-          : [];
+    const imageSourceUrls = imageContext.urls;
 
     console.log("[chat] request", {
       automaticSearchMode,
@@ -767,8 +883,10 @@ export async function POST(request: Request) {
       effectiveSearchMode,
       hasCurrentImageAttachment,
       hasMessage: Boolean(message),
+      hasPreviousUploadedImage: imageContext.source === "previous-upload",
       hasSearchQuery: Boolean(searchQuery),
       hasStructuredImageRequest: Boolean(normalizedImageRequest),
+      imageContextSource: imageContext.source,
       latestImageDocumentId: latestImageDocument?.id ?? null,
       searchMode,
       shouldCreateImageArtifact,
@@ -900,9 +1018,9 @@ export async function POST(request: Request) {
         const imageToolInstructions = shouldUseImageToolPlanning
           ? '\n\nThe current user message includes an uploaded image and asks to create or modify an image. You MUST call createDocument exactly once with kind "image". Use a short display title, and put the user\'s complete requested transformation in the prompt field. The prompt must explicitly preserve the source image subject identity, face, pose, framing, background, line art/style, and original colors unless the user asked to change them. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
           : shouldUpdateExistingImageArtifact && latestImageDocument
-            ? `\n\nThe current user message asks to modify the existing image artifact titled "${latestImageDocument.title}". You MUST call updateDocument exactly once with id "${latestImageDocument.id}" and description equal to the user's full request. Do not call createDocument. The server will pass the existing artifact image as the source image; treat it as the visual reference to edit, not as text-only context. Preserve the current image subject identity, face, pose, framing, background, line art/style, and original colors unless the user explicitly asks to change them. If the requested visual change is unclear, ask one concise clarification question instead of creating a new image.`
+            ? `\n\nThe current user message asks to modify the existing image artifact titled "${latestImageDocument.title}". You MUST call updateDocument exactly once with id "${latestImageDocument.id}" and description equal to the user's full request plus this context: ${imageContext.promptPrefix} Do not call createDocument. The server will pass the existing artifact image as the source image; treat it as the visual reference to edit, not as text-only context. Preserve the current image subject identity, face, pose, framing, background, line art/style, and original colors unless the user explicitly asks to change them. If the requested visual change is unclear, ask one concise clarification question instead of creating a new image.`
             : shouldCreateImageArtifact
-              ? '\n\nThe current user message asks to generate an image artifact. You MUST call createDocument exactly once with kind "image". Use a short display title, and put the user\'s complete image request in the prompt field. If server-side search results are present, use them only as context to enrich the image prompt; do not answer with search text instead of creating the image. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
+              ? `\n\nThe current user message asks to generate an image artifact. You MUST call createDocument exactly once with kind "image". Use a short display title, and put the user's complete image request in the prompt field. Image source context: ${imageContext.promptPrefix} If a source image is available, fit the generated output to that source image's subject, composition, framing, aspect ratio, and visual style unless the user explicitly asks otherwise. If server-side search results are present, use them only as context to enrich the image prompt; do not answer with search text instead of creating the image. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.`
               : "";
 
         let hasAssistantText = false;
@@ -1007,9 +1125,9 @@ export async function POST(request: Request) {
               dataStream,
               modelId: chatModel,
               session,
-              sourceImagePrompt:
-                normalizedImageRequest?.toolPrompt ??
-                (shouldUseImageToolPlanning ? searchQuery : undefined),
+              sourceImagePrompt: shouldUseImageArtifactTool
+                ? contextualImagePrompt
+                : undefined,
               sourceImageUrls: imageSourceUrls,
             }),
             editDocument: editDocument({ dataStream, session }),

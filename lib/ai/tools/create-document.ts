@@ -37,8 +37,14 @@ export const createDocument = ({
       negativePrompt,
     }) => {
       const id = generateUUID();
+      const baseImagePrompt = sourceImagePrompt ?? prompt;
+      const supplementalModelPrompt =
+        sourceImagePrompt && prompt && !sourceImagePrompt.includes(prompt)
+          ? `Model prompt: ${prompt}`
+          : null;
       const imagePromptParts = [
-        prompt ?? sourceImagePrompt,
+        baseImagePrompt,
+        supplementalModelPrompt,
         style ? `Style: ${style}` : null,
         negativePrompt ? `Avoid: ${negativePrompt}` : null,
       ].filter(Boolean);
