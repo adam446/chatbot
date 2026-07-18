@@ -201,6 +201,74 @@ function isImageCreationOrEditRequest(text: string) {
   );
 }
 
+function asksForNewImageArtifact(text: string) {
+  const normalized = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return /\b(new|another|separate|fresh|different|nouveau|nouvelle|autre|separe|separee|different|differente)\b/.test(
+    normalized
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getToolOutput(part: Record<string, unknown>) {
+  for (const key of ["output", "result"] as const) {
+    const output = asRecord(part[key]);
+    if (output) {
+      return output;
+    }
+  }
+
+  if (part.kind === "image") {
+    return part;
+  }
+
+  return null;
+}
+
+function getLatestImageDocumentReference(messages: ChatMessage[]) {
+  for (const msg of [...messages].reverse()) {
+    for (const rawPart of [...msg.parts].reverse()) {
+      const part = asRecord(rawPart);
+      if (!part) {
+        continue;
+      }
+
+      const type = typeof part.type === "string" ? part.type : "";
+      if (
+        !type.includes("createDocument") &&
+        !type.includes("updateDocument")
+      ) {
+        continue;
+      }
+
+      const output = getToolOutput(part);
+      if (
+        output?.kind !== "image" ||
+        typeof output.id !== "string" ||
+        typeof output.title !== "string" ||
+        "error" in output
+      ) {
+        continue;
+      }
+
+      return {
+        id: output.id,
+        title: output.title,
+      };
+    }
+  }
+
+  return null;
+}
+
 function stripImageAttachmentsForToolPlanning(messages: ChatMessage[]) {
   return messages.map((msg, index) => {
     if (msg.role !== "user") {
@@ -469,6 +537,13 @@ export async function POST(request: Request) {
     const searchQuery = getSearchQuery(message as ChatMessage | undefined);
     const shouldUseImageToolPlanning =
       hasCurrentImageAttachment && isImageCreationOrEditRequest(searchQuery);
+    const latestImageDocument = getLatestImageDocumentReference(uiMessages);
+    const shouldUpdateExistingImageArtifact =
+      !shouldUseImageToolPlanning &&
+      !hasCurrentImageAttachment &&
+      Boolean(latestImageDocument) &&
+      isImageCreationOrEditRequest(searchQuery) &&
+      !asksForNewImageArtifact(searchQuery);
     const messagesForModel = shouldUseImageToolPlanning
       ? stripImageAttachmentsForToolPlanning(uiMessages)
       : stripNonLatestImageAttachments(uiMessages);
@@ -488,7 +563,9 @@ export async function POST(request: Request) {
       hasCurrentImageAttachment,
       hasMessage: Boolean(message),
       hasSearchQuery: Boolean(searchQuery),
+      latestImageDocumentId: latestImageDocument?.id ?? null,
       searchMode,
+      shouldUpdateExistingImageArtifact,
       shouldUseImageToolPlanning,
     });
 
@@ -615,7 +692,9 @@ export async function POST(request: Request) {
               : "";
         const imageToolInstructions = shouldUseImageToolPlanning
           ? '\n\nThe current user message includes an uploaded image and asks to create or modify an image. You MUST call createDocument exactly once with kind "image". Use a short display title, and put the user\'s complete requested transformation in the prompt field. The prompt must explicitly preserve the source image subject identity, face, pose, framing, background, line art/style, and original colors unless the user asked to change them. Do not output raw JSON, do not narrate tool use, and do not answer with only a plan.'
-          : "";
+          : shouldUpdateExistingImageArtifact && latestImageDocument
+            ? `\n\nThe current user message asks to modify the existing image artifact titled "${latestImageDocument.title}". You MUST call updateDocument exactly once with id "${latestImageDocument.id}" and description equal to the user's full request. Do not call createDocument. Preserve the current image subject identity, face, pose, framing, background, line art/style, and original colors unless the user explicitly asks to change them. If the requested visual change is unclear, ask one concise clarification question instead of creating a new image.`
+            : "";
 
         let hasAssistantText = false;
 
@@ -642,22 +721,25 @@ export async function POST(request: Request) {
         const result = streamText({
           activeTools: shouldUseImageToolPlanning
             ? ["createDocument"]
-            : hasCurrentImageAttachment || (isReasoningModel && !supportsTools)
-              ? []
-              : [
-                  "searchDocuments",
-                  "searchWeb",
-                  "deepSearch",
-                  "getSkillDetails",
-                  "getItems",
-                  "getItemById",
-                  "submitAction",
-                  "getWeather",
-                  "createDocument",
-                  "editDocument",
-                  "updateDocument",
-                  "requestSuggestions",
-                ],
+            : shouldUpdateExistingImageArtifact
+              ? ["updateDocument"]
+              : hasCurrentImageAttachment ||
+                  (isReasoningModel && !supportsTools)
+                ? []
+                : [
+                    "searchDocuments",
+                    "searchWeb",
+                    "deepSearch",
+                    "getSkillDetails",
+                    "getItems",
+                    "getItemById",
+                    "submitAction",
+                    "getWeather",
+                    "createDocument",
+                    "editDocument",
+                    "updateDocument",
+                    "requestSuggestions",
+                  ],
           instructions: `${buildSystemPrompt()}${searchInstructions}${imageToolInstructions}${serverSearchContext}`,
           messages: modelMessages,
           model: getLanguageModel(chatModel),
@@ -693,7 +775,11 @@ export async function POST(request: Request) {
               openai: { reasoningEffort: modelConfig.reasoningEffort },
             }),
           },
-          stopWhen: isStepCount(shouldUseImageToolPlanning ? 1 : 5),
+          stopWhen: isStepCount(
+            shouldUseImageToolPlanning || shouldUpdateExistingImageArtifact
+              ? 2
+              : 5
+          ),
           telemetry: {
             functionId: "stream-text",
             isEnabled: isProductionEnvironment,
