@@ -225,7 +225,8 @@ export async function POST(request: Request) {
   try {
     const json = await request.json();
     requestBody = postRequestBodySchema.parse(json);
-  } catch {
+  } catch (error) {
+    console.error("[chat] bad request", error);
     return new ChatbotError("bad_request:api").toResponse();
   }
 
