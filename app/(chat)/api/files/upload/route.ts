@@ -109,6 +109,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ...data,
         contentType: verifiedContentType,
+        filename: safeName,
         storage: "vercel_blob_private",
         url: url.toString(),
         verified: true,
