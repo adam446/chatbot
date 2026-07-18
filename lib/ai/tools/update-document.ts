@@ -33,11 +33,29 @@ export const updateDocument = ({
         return { error: "Forbidden" };
       }
 
-      dataStream.write({
-        data: null,
-        transient: true,
-        type: "data-clear",
-      });
+      if (document.kind === "image") {
+        dataStream.write({
+          data: document.kind,
+          transient: true,
+          type: "data-kind",
+        });
+        dataStream.write({
+          data: document.id,
+          transient: true,
+          type: "data-id",
+        });
+        dataStream.write({
+          data: document.title,
+          transient: true,
+          type: "data-title",
+        });
+      } else {
+        dataStream.write({
+          data: null,
+          transient: true,
+          type: "data-clear",
+        });
+      }
 
       const documentHandler = documentHandlersByArtifactKind.find(
         (documentHandlerByArtifactKind) =>
