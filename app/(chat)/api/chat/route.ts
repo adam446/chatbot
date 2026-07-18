@@ -241,6 +241,30 @@ function stripImageAttachmentsForToolPlanning(messages: ChatMessage[]) {
   });
 }
 
+function stripNonLatestImageAttachments(messages: ChatMessage[]) {
+  const latestIndex = messages.length - 1;
+
+  return messages.map((msg, index) => {
+    if (msg.role !== "user" || index === latestIndex) {
+      return msg;
+    }
+
+    const filteredParts = msg.parts.filter(
+      (part) =>
+        !(
+          part.type === "file" &&
+          "mediaType" in part &&
+          typeof part.mediaType === "string" &&
+          part.mediaType.startsWith("image/")
+        )
+    );
+
+    return filteredParts.length === msg.parts.length
+      ? msg
+      : { ...msg, parts: filteredParts };
+  });
+}
+
 function formatServerSearchContext(
   mode: "search" | "deep",
   search:
@@ -445,15 +469,14 @@ export async function POST(request: Request) {
     const searchQuery = getSearchQuery(message as ChatMessage | undefined);
     const shouldUseImageToolPlanning =
       hasCurrentImageAttachment && isImageCreationOrEditRequest(searchQuery);
+    const messagesForModel = shouldUseImageToolPlanning
+      ? stripImageAttachmentsForToolPlanning(uiMessages)
+      : stripNonLatestImageAttachments(uiMessages);
     const hydratedMessages = await hydratePrivateAttachmentsForModel({
-      messages: uiMessages,
+      messages: messagesForModel,
       userId: session.user.id,
     });
-    const modelMessages = await convertToModelMessages(
-      shouldUseImageToolPlanning
-        ? stripImageAttachmentsForToolPlanning(hydratedMessages)
-        : hydratedMessages
-    );
+    const modelMessages = await convertToModelMessages(hydratedMessages);
     const automaticSearchMode = getAutomaticSearchMode(searchQuery);
     const effectiveSearchMode =
       searchMode === "off" ? automaticSearchMode : searchMode;
