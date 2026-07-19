@@ -1033,6 +1033,11 @@ export async function POST(request: Request) {
           );
         } else if (searchQuery && effectiveSearchMode === "deep") {
           writeWaitingStatus("waiting", "Deep searching...");
+          const deepSearchAbortController = new AbortController();
+          const deepSearchBudgetTimer = setTimeout(
+            () => deepSearchAbortController.abort(),
+            120_000
+          );
           const deepSearchPromise = deepSearch(
             searchQuery,
             ({ phase, completed, total }) => {
@@ -1050,7 +1055,8 @@ export async function POST(request: Request) {
                 phase === "synthesizing" ? "thinking" : "waiting",
                 `${labels[phase]}${progress}`
               );
-            }
+            },
+            deepSearchAbortController.signal
           );
           let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
           try {
@@ -1068,12 +1074,24 @@ export async function POST(request: Request) {
                   report: null,
                   summary: "",
                 });
-              }, 150_000);
+              }, 125_000);
             });
-            const search = await Promise.race([
+            let search = await Promise.race([
               deepSearchPromise,
               fallbackPromise,
             ]);
+            if (deepSearchAbortController.signal.aborted) {
+              const fallback = await searchWeb(searchQuery);
+              search = {
+                ...fallback,
+                message:
+                  fallback.message ??
+                  "Deep search exceeded its time budget; used a direct search fallback.",
+                plannedQueries: [searchQuery],
+                report: null,
+                summary: "",
+              };
+            }
             clearTimeout(fallbackTimer);
             fallbackTimer = undefined;
             const verifiedAnswer = buildVerifiedSearchAnswer({
@@ -1096,6 +1114,7 @@ export async function POST(request: Request) {
               verifiedAnswer
             );
           } finally {
+            clearTimeout(deepSearchBudgetTimer);
             if (fallbackTimer) {
               clearTimeout(fallbackTimer);
             }
@@ -1150,8 +1169,9 @@ export async function POST(request: Request) {
                   ? []
                   : [
                       "searchDocuments",
-                      "searchWeb",
-                      "deepSearch",
+                      ...(effectiveSearchMode === "deep"
+                        ? ([] as const)
+                        : (["searchWeb", "deepSearch"] as const)),
                       "getSkillDetails",
                       "getItems",
                       "getItemById",
