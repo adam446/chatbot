@@ -1,30 +1,16 @@
-import { createClient } from "redis";
-
 import { isProductionEnvironment } from "@/lib/constants";
 import { ChatbotError } from "@/lib/errors";
+import { getRedisClient } from "@/lib/redis";
 
 const MAX_MESSAGES = 10;
 const TTL_SECONDS = 60 * 60;
-
-let client: ReturnType<typeof createClient> | null = null;
-
-function getClient() {
-  if (!client && process.env.REDIS_URL) {
-    client = createClient({ url: process.env.REDIS_URL });
-    client.on("error", () => undefined);
-    client.connect().catch(() => {
-      client = null;
-    });
-  }
-  return client;
-}
 
 export async function checkIpRateLimit(ip: string | undefined) {
   if (!isProductionEnvironment || !ip) {
     return;
   }
 
-  const redis = getClient();
+  const redis = getRedisClient();
   if (!redis?.isReady) {
     return;
   }
