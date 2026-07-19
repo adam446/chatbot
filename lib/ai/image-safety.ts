@@ -9,6 +9,7 @@ const safetyResultSchema = z.object({
   allowed: z.boolean(),
   categories: z.array(z.string()).default([]),
   reason: z.string().min(1),
+  subjectType: z.enum(["fictional", "real", "unknown"]).default("unknown"),
 });
 
 export type ImageSafetyMode = "create" | "edit";
@@ -63,10 +64,14 @@ async function evaluateWithFallbackModels({
   index,
   modelIds,
   prompt,
+  sourceImageBase64,
+  sourceImageMimeType,
 }: {
   index: number;
   modelIds: string[];
   prompt: string;
+  sourceImageBase64?: string;
+  sourceImageMimeType?: string;
 }): Promise<ImageSafetyResult> {
   const modelId = modelIds[index];
 
@@ -75,13 +80,29 @@ async function evaluateWithFallbackModels({
   }
 
   try {
-    const { text } = await generateText({
+    const { text: responseText } = await generateText({
+      messages: [
+        {
+          content: [
+            { text: prompt, type: "text" },
+            ...(sourceImageBase64
+              ? [
+                  {
+                    image: Buffer.from(sourceImageBase64, "base64"),
+                    mediaType: sourceImageMimeType ?? "image/png",
+                    type: "image" as const,
+                  },
+                ]
+              : []),
+          ],
+          role: "user",
+        },
+      ],
       model: getLanguageModel(modelId),
-      prompt,
       temperature: 0,
     });
 
-    return parseSafetyJson(text);
+    return parseSafetyJson(responseText);
   } catch (error) {
     if (index >= modelIds.length - 1) {
       throw error;
@@ -91,6 +112,8 @@ async function evaluateWithFallbackModels({
       index: index + 1,
       modelIds,
       prompt,
+      sourceImageBase64,
+      sourceImageMimeType,
     });
   }
 }
@@ -99,31 +122,53 @@ export async function evaluateImageSafety({
   mode,
   prompt,
   sourceImagePresent = false,
+  sourceImageBase64,
+  sourceImageMimeType,
 }: {
   mode: ImageSafetyMode;
   prompt: string;
   sourceImagePresent?: boolean;
+  sourceImageBase64?: string;
+  sourceImageMimeType?: string;
 }): Promise<ImageSafetyResult> {
   const promptText = `Evaluate this image ${mode} request before any image model runs.
 
 Policy:
 - Allow fictional graphic violence, gore, horror, injuries, monsters, battle scenes, and stylized violent artwork.
+- Allow a mug-shot-style portrait of an explicitly fictional character. A fictional character is not a real identity and should not be classified as doxxing solely because the requested framing resembles an administrative or mug-shot portrait.
 - Block illegal content only, including sexual content involving minors, sexual exploitation, non-consensual intimate imagery, doxxing, credential theft, fraud, operational illegal weapons/explosives guidance, evasion of law enforcement, and explicit requests to depict a real person committing an illegal act.
-- If unsure whether the request is illegal, block.
+- If the subject is a real person or the subject type cannot be established, block doxxing or identity-risk requests. If unsure whether the request is illegal, block.
 
 Return ONLY compact JSON with this exact shape:
-{"allowed":boolean,"categories":["category"],"reason":"detailed reason"}
+{"allowed":boolean,"categories":["category"],"reason":"detailed reason","subjectType":"fictional|real|unknown"}
 
 Source image attached: ${sourceImagePresent ? "yes" : "no"}
 Request:
 ${prompt}`;
 
   try {
-    return await evaluateWithFallbackModels({
+    const result = await evaluateWithFallbackModels({
       index: 0,
       modelIds: getSafetyModelIds(),
       prompt: promptText,
+      sourceImageBase64,
+      sourceImageMimeType,
     });
+
+    const onlyDoxxing =
+      result.categories.length > 0 &&
+      result.categories.every((category) => category === "doxxing");
+    if (onlyDoxxing && result.subjectType === "fictional") {
+      return {
+        ...result,
+        allowed: true,
+        categories: [],
+        reason:
+          "The subject was classified as fictional; the mug-shot-style framing does not identify a real person.",
+      };
+    }
+
+    return result;
   } catch (error) {
     return {
       allowed: false,
@@ -132,6 +177,7 @@ ${prompt}`;
         error instanceof Error
           ? `Safety check failed closed: ${error.message}`
           : "Safety check failed closed.",
+      subjectType: "unknown",
     };
   }
 }

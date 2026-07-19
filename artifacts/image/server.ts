@@ -121,16 +121,6 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
       type: "data-waiting-status",
     });
 
-    const safety = await evaluateImageSafety({
-      mode: sourceImageUrl ? "edit" : "create",
-      prompt: generationPrompt,
-      sourceImagePresent: Boolean(sourceImageUrl),
-    });
-
-    if (!safety.allowed) {
-      throw new ImageSafetyBlockError(safety);
-    }
-
     if (sourceImageUrl) {
       dataStream.write({
         data: {
@@ -147,6 +137,19 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     const sourceImage = sourceImageUrl
       ? await fetchImageAsBase64(sourceImageUrl)
       : null;
+
+    const safety = await evaluateImageSafety({
+      mode: sourceImageUrl ? "edit" : "create",
+      prompt: generationPrompt,
+      sourceImageBase64: sourceImage?.base64,
+      sourceImageMimeType: sourceImage?.mimeType,
+      sourceImagePresent: Boolean(sourceImageUrl),
+    });
+
+    if (!safety.allowed) {
+      throw new ImageSafetyBlockError(safety);
+    }
+
     const sendSourceImage = Boolean(
       sourceImage && canSendSourceImageToNvidia()
     );
@@ -218,6 +221,8 @@ export const imageDocumentHandler = createDocumentHandler<"image">({
     const safety = await evaluateImageSafety({
       mode: "edit",
       prompt: generationPrompt,
+      sourceImageBase64: previousImage,
+      sourceImageMimeType: getImageMimeTypeFromBase64(previousImage),
       sourceImagePresent: true,
     });
 

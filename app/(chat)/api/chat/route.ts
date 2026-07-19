@@ -6,6 +6,7 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   generateId,
+  hasToolCall,
   isStepCount,
   streamText,
   toUIMessageStream,
@@ -1108,7 +1109,9 @@ export async function POST(request: Request) {
               openai: { reasoningEffort: modelConfig.reasoningEffort },
             }),
           },
-          stopWhen: isStepCount(shouldUseImageArtifactTool ? 2 : 5),
+          stopWhen: shouldUseImageArtifactTool
+            ? hasToolCall("createDocument", "updateDocument")
+            : isStepCount(5),
           telemetry: {
             functionId: "stream-text",
             isEnabled: isProductionEnvironment,
