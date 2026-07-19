@@ -63,9 +63,9 @@ import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
 const HEALTH_CHECK_DELAY_MS = 9000;
-// Vercel applies the project/plan maximum when this is supported. Deep Search
-// still aborts its work before the platform limit when it is not.
-export const maxDuration = 800;
+// Hobby deployments are capped at 300 seconds. Deep Search still aborts its
+// work before that platform limit.
+export const maxDuration = 300;
 const BOTID_ENABLED = process.env.NEXT_PUBLIC_BOTID_ENABLED === "1";
 const MODEL_IMAGE_CONTENT_TYPES = new Set([
   "image/jpeg",
