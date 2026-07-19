@@ -48,7 +48,8 @@ export function DataStreamProvider({
   >("idle");
 
   const markGenerationStarted = useCallback(() => {
-    setGenerationStartedAt((startedAt) => startedAt ?? Date.now());
+    // Each submitted message owns an independent elapsed-time counter.
+    setGenerationStartedAt(Date.now());
     setGenerationElapsedMs(0);
     setGenerationOutcome("active");
   }, []);
