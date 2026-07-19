@@ -15,7 +15,9 @@ test.describe("Chat Page", () => {
 
   test("submit button is visible", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByTestId("send-button")).toBeVisible();
+    const sendButton = page.getByTestId("send-button");
+    await expect(sendButton).toBeVisible();
+    await expect(sendButton).toHaveAttribute("aria-label", "Send message");
   });
 
   test("suggested actions are visible on empty chat", async ({ page }) => {
@@ -37,6 +39,21 @@ test.describe("Chat Page", () => {
     // This is a best-effort check since timing depends on API
     await stopButton.click({ timeout: 5000 }).catch(() => {
       // Generation may have finished before we could click
+    });
+  });
+
+  test("generation status is exposed while the request is active", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.getByTestId("multimodal-input").fill("Hello");
+    await page.getByTestId("send-button").click();
+
+    await expect(page.getByTestId("stop-button")).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(page.getByTestId("generation-status")).toBeVisible({
+      timeout: 5000,
     });
   });
 });

@@ -17,6 +17,7 @@ export function MessageReasoning({
   reasoning,
 }: MessageReasoningProps) {
   const [hasBeenStreaming, setHasBeenStreaming] = useState(isLoading);
+  const summary = reasoning.replace(/\s+/g, " ").trim().slice(0, 220);
 
   useEffect(() => {
     if (isLoading) {
@@ -31,7 +32,11 @@ export function MessageReasoning({
       isStreaming={isLoading}
     >
       <ReasoningTrigger />
-      <ReasoningContent>{reasoning}</ReasoningContent>
+      <ReasoningContent>
+        {summary
+          ? `Working through: ${summary}${reasoning.length > 220 ? "..." : ""}`
+          : "Working through the request..."}
+      </ReasoningContent>
     </Reasoning>
   );
 }
