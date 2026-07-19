@@ -384,6 +384,17 @@ function asksForNewImageArtifact(text: string) {
   );
 }
 
+function isNonImageArtifactRequest(text: string) {
+  const normalized = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return /\b(document|essay|article|rapport|report|script|code|program|spreadsheet|tableur|sheet|fichier|file|redige|rediger|ecris|ecrire|write)\b/.test(
+    normalized
+  );
+}
+
 function getImageAttachmentUrlsFromMessage(message: ChatMessage) {
   return message.parts
     .filter(
@@ -850,6 +861,8 @@ export async function POST(request: Request) {
       shouldUseImageToolPlanning ||
       shouldUpdateExistingImageArtifact ||
       shouldCreateImageArtifact;
+    const shouldExposeArtifactTools =
+      shouldUseImageArtifactTool || isNonImageArtifactRequest(searchQuery);
     const contextualImagePrompt =
       shouldUseImageArtifactTool && imageContext.source !== "none"
         ? `${imageContext.promptPrefix}\n\nUser request:\n${
@@ -1065,9 +1078,13 @@ export async function POST(request: Request) {
                       "getItemById",
                       "submitAction",
                       "getWeather",
-                      "createDocument",
-                      "editDocument",
-                      "updateDocument",
+                      ...(shouldExposeArtifactTools
+                        ? ([
+                            "createDocument",
+                            "editDocument",
+                            "updateDocument",
+                          ] as const)
+                        : []),
                       "requestSuggestions",
                     ],
           instructions: `${buildSystemPrompt()}${searchInstructions}${imageToolInstructions}${serverSearchContext}`,
