@@ -1002,25 +1002,72 @@ export async function POST(request: Request) {
           );
         } else if (searchQuery && effectiveSearchMode === "deep") {
           writeWaitingStatus("waiting", "Deep searching...");
-          const search = await deepSearch(searchQuery);
-          const verifiedAnswer = buildVerifiedSearchAnswer({
-            query: searchQuery,
-            results: search.results,
-          });
-          fallbackVerifiedAnswer = verifiedAnswer?.fallbackText ?? null;
-          console.log("[search] server-side deep search", {
-            automaticSearchMode,
-            configured: search.configured,
-            provider: search.provider,
-            requestedSearchMode: searchMode,
-            results: search.results.length,
-            verifiedAnswer: Boolean(verifiedAnswer),
-          });
-          serverSearchContext = formatServerSearchContext(
-            "deep",
-            search,
-            verifiedAnswer
+          const deepSearchPromise = deepSearch(
+            searchQuery,
+            ({ phase, completed, total }) => {
+              const labels = {
+                planning: "Planning deep search...",
+                reading: "Reading sources...",
+                searching: "Searching sources...",
+                synthesizing: "Synthesizing findings...",
+              } as const;
+              const progress =
+                typeof completed === "number" && typeof total === "number"
+                  ? ` (${completed}/${total})`
+                  : "";
+              writeWaitingStatus(
+                phase === "synthesizing" ? "thinking" : "waiting",
+                `${labels[phase]}${progress}`
+              );
+            }
           );
+          let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const fallbackPromise = new Promise<
+              Awaited<ReturnType<typeof deepSearch>>
+            >((resolve) => {
+              fallbackTimer = setTimeout(async () => {
+                const fallback = await searchWeb(searchQuery);
+                resolve({
+                  ...fallback,
+                  message:
+                    fallback.message ??
+                    "Deep search timed out; used a direct search fallback.",
+                  plannedQueries: [searchQuery],
+                  report: null,
+                  summary: "",
+                });
+              }, 150_000);
+            });
+            const search = await Promise.race([
+              deepSearchPromise,
+              fallbackPromise,
+            ]);
+            clearTimeout(fallbackTimer);
+            fallbackTimer = undefined;
+            const verifiedAnswer = buildVerifiedSearchAnswer({
+              query: searchQuery,
+              results: search.results,
+            });
+            fallbackVerifiedAnswer = verifiedAnswer?.fallbackText ?? null;
+            console.log("[search] server-side deep search", {
+              automaticSearchMode,
+              configured: search.configured,
+              provider: search.provider,
+              requestedSearchMode: searchMode,
+              results: search.results.length,
+              verifiedAnswer: Boolean(verifiedAnswer),
+            });
+            serverSearchContext = formatServerSearchContext(
+              "deep",
+              search,
+              verifiedAnswer
+            );
+          } finally {
+            if (fallbackTimer) {
+              clearTimeout(fallbackTimer);
+            }
+          }
         }
 
         const searchInstructions =
