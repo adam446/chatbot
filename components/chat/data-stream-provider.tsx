@@ -2,7 +2,14 @@
 
 import type { DataUIPart } from "ai";
 import type React from "react";
-import { createContext, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import type { CustomUIDataTypes, WaitingStatusData } from "@/lib/types";
 
 type DataStreamContextValue = {
@@ -14,6 +21,11 @@ type DataStreamContextValue = {
   setWaitingStatus: React.Dispatch<
     React.SetStateAction<WaitingStatusData | undefined>
   >;
+  generationElapsedMs: number;
+  generationStartedAt: number | null;
+  markGenerationFinished: (outcome: "completed" | "error" | "stopped") => void;
+  markGenerationStarted: () => void;
+  generationOutcome: "idle" | "active" | "completed" | "error" | "stopped";
 };
 
 const DataStreamContext = createContext<DataStreamContextValue | null>(null);
@@ -27,10 +39,63 @@ export function DataStreamProvider({
     []
   );
   const [waitingStatus, setWaitingStatus] = useState<WaitingStatusData>();
+  const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(
+    null
+  );
+  const [generationElapsedMs, setGenerationElapsedMs] = useState(0);
+  const [generationOutcome, setGenerationOutcome] = useState<
+    "idle" | "active" | "completed" | "error" | "stopped"
+  >("idle");
+
+  const markGenerationStarted = useCallback(() => {
+    setGenerationStartedAt((startedAt) => startedAt ?? Date.now());
+    setGenerationElapsedMs(0);
+    setGenerationOutcome("active");
+  }, []);
+
+  const markGenerationFinished = useCallback(
+    (outcome: "completed" | "error" | "stopped") => {
+      if (generationStartedAt) {
+        setGenerationElapsedMs(Date.now() - generationStartedAt);
+      }
+      setGenerationOutcome(outcome);
+    },
+    [generationStartedAt]
+  );
+
+  useEffect(() => {
+    if (generationOutcome !== "active" || generationStartedAt === null) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setGenerationElapsedMs(Date.now() - generationStartedAt);
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, [generationOutcome, generationStartedAt]);
 
   const value = useMemo(
-    () => ({ dataStream, setDataStream, setWaitingStatus, waitingStatus }),
-    [dataStream, waitingStatus]
+    () => ({
+      dataStream,
+      generationElapsedMs,
+      generationOutcome,
+      generationStartedAt,
+      markGenerationFinished,
+      markGenerationStarted,
+      setDataStream,
+      setWaitingStatus,
+      waitingStatus,
+    }),
+    [
+      dataStream,
+      generationElapsedMs,
+      generationOutcome,
+      generationStartedAt,
+      waitingStatus,
+      markGenerationFinished,
+      markGenerationStarted,
+    ]
   );
 
   return (

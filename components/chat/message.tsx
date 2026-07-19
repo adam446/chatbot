@@ -16,6 +16,7 @@ import {
 import { useDataStream } from "./data-stream-provider";
 import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
+import { GenerationStatus } from "./generation-status";
 import { SparklesIcon } from "./icons";
 import { MessageActions } from "./message-actions";
 import { MessageReasoning } from "./message-reasoning";
@@ -426,7 +427,10 @@ export const ThinkingMessage = () => (
         </div>
       </div>
 
-      <WaitingText />
+      <div className="flex min-w-0 flex-col">
+        <WaitingText />
+        <GenerationStatus className="mt-1" />
+      </div>
     </div>
   </div>
 );

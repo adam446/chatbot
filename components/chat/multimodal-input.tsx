@@ -4,7 +4,6 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
 import {
-  ArrowUpIcon,
   BrainIcon,
   EyeIcon,
   LockIcon,
@@ -55,7 +54,9 @@ import {
 } from "../ai-elements/prompt-input";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-import { PaperclipIcon, StopIcon } from "./icons";
+import { useDataStream } from "./data-stream-provider";
+import { GenerationStatus } from "./generation-status";
+import { PaperclipIcon } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
 import {
   type SlashCommand,
@@ -254,6 +255,33 @@ function PureMultimodalInput({
   const [slashQuery, setSlashQuery] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
   const [searchMode, setSearchMode] = useState<SearchMode>("off");
+  const { generationOutcome, markGenerationFinished, markGenerationStarted } =
+    useDataStream();
+  const stopRequestedRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      (status !== "ready" && status !== "error") ||
+      generationOutcome !== "active"
+    ) {
+      return;
+    }
+
+    markGenerationFinished(
+      stopRequestedRef.current
+        ? "stopped"
+        : status === "error"
+          ? "error"
+          : "completed"
+    );
+    stopRequestedRef.current = false;
+  }, [generationOutcome, markGenerationFinished, status]);
+
+  const handleStop = useCallback(() => {
+    stopRequestedRef.current = true;
+    stop();
+    markGenerationFinished("stopped");
+  }, [markGenerationFinished, stop]);
 
   const handleInput = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -540,11 +568,20 @@ function PureMultimodalInput({
       return;
     }
     if (status === "ready" || status === "error") {
+      stopRequestedRef.current = false;
+      markGenerationStarted();
       submitForm();
     } else {
       toast.error("Please wait for the model to finish its response!");
     }
-  }, [attachments.length, handleSlashSelect, input, status, submitForm]);
+  }, [
+    attachments.length,
+    handleSlashSelect,
+    input,
+    markGenerationStarted,
+    status,
+    submitForm,
+  ]);
 
   const handleTextareaKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -698,26 +735,37 @@ function PureMultimodalInput({
             />
           </PromptInputTools>
 
-          {status === "submitted" ? (
-            <StopButton setMessages={setMessages} stop={stop} />
-          ) : (
-            <PromptInputSubmit
-              className={cn(
-                "h-7 w-7 rounded-xl transition-all duration-200",
-                input.trim()
+          <PromptInputSubmit
+            aria-label={
+              status === "submitted" || status === "streaming"
+                ? "Stop generation"
+                : "Send message"
+            }
+            className={cn(
+              "h-7 w-7 rounded-lg transition-all duration-200",
+              status === "submitted" || status === "streaming"
+                ? "bg-foreground text-background hover:opacity-85 active:scale-95"
+                : input.trim()
                   ? "bg-foreground text-background hover:opacity-85 active:scale-95"
                   : "bg-muted text-muted-foreground/25 cursor-not-allowed"
-              )}
-              data-testid="send-button"
-              disabled={!input.trim() || uploadQueue.length > 0}
-              status={status}
-              variant="secondary"
-            >
-              <ArrowUpIcon className="size-4" />
-            </PromptInputSubmit>
-          )}
+            )}
+            data-testid={
+              status === "submitted" || status === "streaming"
+                ? "stop-button"
+                : "send-button"
+            }
+            disabled={
+              status !== "submitted" &&
+              status !== "streaming" &&
+              (!input.trim() || uploadQueue.length > 0)
+            }
+            onStop={handleStop}
+            status={status}
+            variant="secondary"
+          />
         </PromptInputFooter>
       </PromptInput>
+      <GenerationStatus className="px-2" />
     </div>
   );
 }
@@ -1128,32 +1176,3 @@ function PureModelSelectorCompact({
 }
 
 const ModelSelectorCompact = memo(PureModelSelectorCompact);
-
-function PureStopButton({
-  stop,
-  setMessages,
-}: {
-  stop: () => void;
-  setMessages: UseChatHelpers<ChatMessage>["setMessages"];
-}) {
-  const handleClick = useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      event.preventDefault();
-      stop();
-      setMessages((messages) => messages);
-    },
-    [setMessages, stop]
-  );
-
-  return (
-    <Button
-      className="h-7 w-7 rounded-xl bg-foreground p-1 text-background transition-all duration-200 hover:opacity-85 active:scale-95 disabled:bg-muted disabled:text-muted-foreground/25 disabled:cursor-not-allowed"
-      data-testid="stop-button"
-      onClick={handleClick}
-    >
-      <StopIcon size={14} />
-    </Button>
-  );
-}
-
-const StopButton = memo(PureStopButton);
