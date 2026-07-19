@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { postRequestBodySchema } from "@/app/(chat)/api/chat/schema";
-import { getAutomaticSearchMode } from "@/lib/search-mode";
-import { deepSearch, rankSearchResultsForAnswer } from "@/lib/web-search";
+import { getAutomaticSearchMode, isChronologyQuery } from "@/lib/search-mode";
+import {
+  buildVerifiedSearchAnswer,
+  deepSearch,
+  rankSearchResultsForAnswer,
+} from "@/lib/web-search";
 
 test.describe("Search mode detection", () => {
   test("detects freshness-sensitive prompts", () => {
@@ -17,8 +21,20 @@ test.describe("Search mode detection", () => {
     expect(getAutomaticSearchMode("deep search prime minister Canada")).toBe(
       "deep"
     );
+    expect(
+      getAutomaticSearchMode(
+        "Donne-moi par dates les éléments clés de la guerre commerciale US-Canada"
+      )
+    ).toBe("deep");
     expect(getAutomaticSearchMode("explique le routing dans Next.js")).toBe(
       "off"
+    );
+  });
+
+  test("recognizes chronology requests", () => {
+    expect(isChronologyQuery("US-Canada trade war timeline")).toBe(true);
+    expect(isChronologyQuery("What is the current prime minister?")).toBe(
+      false
     );
   });
 
@@ -74,6 +90,21 @@ test.describe("Search mode detection", () => {
     ]);
 
     expect(ranked[0].url).toBe("https://www.pm.gc.ca/en/about");
+  });
+
+  test("does not turn a generic source snippet into the final answer", () => {
+    expect(
+      buildVerifiedSearchAnswer({
+        query: "key elements of the US-Canada trade war by date",
+        results: [
+          {
+            snippet: "An official website of the United States government.",
+            title: "Office of the U.S. Trade Representative",
+            url: "https://ustr.gov/",
+          },
+        ],
+      })
+    ).toBeNull();
   });
 
   test("deep search keeps multiple angles when providers are unavailable", async () => {
