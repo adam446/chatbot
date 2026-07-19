@@ -259,12 +259,30 @@ const PurePreviewMessage = ({
       const { toolCallId } = part;
 
       if (part.output && "error" in part.output) {
+        const output = part.output as {
+          blocked?: boolean;
+          error?: unknown;
+          reason?: unknown;
+        };
+
+        if (output.blocked === true) {
+          return (
+            <div
+              className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
+              key={toolCallId}
+            >
+              Image request blocked for safety:{" "}
+              {String(output.reason ?? output.error)}
+            </div>
+          );
+        }
+
         return (
           <div
             className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-500 dark:bg-red-950/50"
             key={toolCallId}
           >
-            Error creating document: {String(part.output.error)}
+            Error creating document: {String(output.error)}
           </div>
         );
       }
