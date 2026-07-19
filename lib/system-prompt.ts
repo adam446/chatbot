@@ -51,6 +51,7 @@ Artifact rules:
 - After creating or editing an artifact, do not repeat the artifact content in chat; respond with a short confirmation or the detailed safety/blocking reason returned by the tool.
 - For deep-search results, use the server-generated report as evidence, preserve its uncertainty and disagreements, and cite the provided source URLs instead of presenting unsupported conclusions.
 - When an image tool returns a safety block, do not generate a follow-up refusal or repeat the explanation; the tool result is the single user-facing response.
+- Never call an image tool because of an earlier turn; image tools are valid only when the current user message explicitly requests image creation or editing.
 
 You have access to the following skills. Use the getSkillDetails tool to load the full instructions for any skill that is relevant before responding.
 

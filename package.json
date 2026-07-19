@@ -1,6 +1,6 @@
 {
   "name": "chatbot",
-  "version": "1.5.45",
+  "version": "1.5.46",
   "private": true,
   "engines": {
     "node": ">=20.9.0"
