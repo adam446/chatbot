@@ -638,6 +638,7 @@ function formatServerSearchContext(
   }
 
   const sources = search.results
+    .slice(0, 40)
     .map(
       (result, index) =>
         `${index + 1}. ${result.title}\nURL: ${result.url}\nSnippet: ${result.snippet}`
@@ -652,6 +653,14 @@ function formatServerSearchContext(
           `Key findings: ${search.report.keyFindings.join(" | ") || "None"}`,
           `Disagreements: ${search.report.disagreements.join(" | ") || "None identified"}`,
           `Limitations: ${search.report.limitations.join(" | ") || "None stated"}`,
+          `Cross-checked claims: ${
+            search.report.claims
+              ?.map(
+                (claim) =>
+                  `[${claim.confidence}] ${claim.claim} (sources: ${claim.supportingSources.join(", ")})`
+              )
+              .join(" | ") || "None extracted"
+          }`,
           `Citations: ${search.report.citations.join(" | ") || "None"}`,
         ].join("\n")
       : null;
@@ -687,6 +696,9 @@ function formatServerSearchContext(
     chronologyInstructions,
     "Sources:",
     sources,
+    search.results.length > 40
+      ? `Additional sources searched and cross-referenced: ${search.results.length - 40}. They are summarized in the claims and confidence assessment above.`
+      : "",
     "Do not say web search is unavailable when server-side results are provided above.",
   ].join("\n");
 }
