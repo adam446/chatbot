@@ -1,5 +1,15 @@
 export type SearchMode = "off" | "search" | "deep";
 
+export function isChronologyQuery(query: string) {
+  const normalized = query
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+  return /\b(chronologie|chronology|historique|history|timeline|par dates?|by dates?|key elements|elements? cles|points? cles|depuis|since|entre \d{4}|from \d{4})\b/.test(
+    normalized
+  );
+}
+
 export function getAutomaticSearchMode(query: string): SearchMode {
   const normalized = query
     .normalize("NFD")
@@ -11,6 +21,16 @@ export function getAutomaticSearchMode(query: string): SearchMode {
       normalized
     )
   ) {
+    return "deep";
+  }
+
+  const asksForChronology = isChronologyQuery(query);
+  const asksForMultiAngleResearch =
+    /\b(comparer|compare|comparaison|evolution|évolution|impact|causes?|consequences?|conséquences?|disputes?|tensions?|trade war|guerre commerciale)\b/.test(
+      normalized
+    );
+
+  if (asksForChronology || asksForMultiAngleResearch) {
     return "deep";
   }
 

@@ -45,7 +45,7 @@ import {
 import type { DBMessage } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
 import { checkIpRateLimit } from "@/lib/ratelimit";
-import { getAutomaticSearchMode } from "@/lib/search-mode";
+import { getAutomaticSearchMode, isChronologyQuery } from "@/lib/search-mode";
 import { buildSystemPrompt } from "@/lib/system-prompt";
 import { createTools } from "@/lib/tools";
 import type { ChatMessage, WaitingStatusData } from "@/lib/types";
@@ -623,6 +623,7 @@ function stripNonLatestImageAttachments(messages: ChatMessage[]) {
 
 function formatServerSearchContext(
   mode: "search" | "deep",
+  query: string,
   search:
     | Awaited<ReturnType<typeof searchWeb>>
     | Awaited<ReturnType<typeof deepSearch>>,
@@ -655,6 +656,22 @@ function formatServerSearchContext(
         ].join("\n")
       : null;
 
+  const chronologyInstructions = isChronologyQuery(query)
+    ? [
+        "The user requested a chronology or dated key elements.",
+        "Answer in the user's language using this exact structure:",
+        "1. A two-sentence overview of the dispute and its scope.",
+        "2. A chronological list grouped by period, with each bullet beginning with a bold date or date range.",
+        "3. For each event, state the actor, action, immediate consequence, and cite the supporting URL.",
+        "4. A short Key themes section and a Sources / limitations section.",
+        "Do not replace the chronology with a generic description of an institution or a single source snippet.",
+        "Keep the historical context, distinguish confirmed facts from interpretation, and mention disagreements when sources differ.",
+      ].join("\n")
+    : [
+        "Answer the user's actual question directly before adding background.",
+        "Use concise headings and bullets when they improve readability.",
+      ].join("\n");
+
   return [
     `\n\nServer-side ${mode} results are already available for this turn.`,
     `Provider: ${search.provider ?? "unknown"}`,
@@ -667,6 +684,7 @@ function formatServerSearchContext(
     "If sources conflict, prefer official government or primary-source domains over Wikipedia, social media, or older secondary summaries.",
     "Do not assume the first raw web result is correct unless it is also the highest-priority ranked source below.",
     "Cite the relevant URLs in the answer.",
+    chronologyInstructions,
     "Sources:",
     sources,
     "Do not say web search is unavailable when server-side results are provided above.",
@@ -997,6 +1015,7 @@ export async function POST(request: Request) {
           });
           serverSearchContext = formatServerSearchContext(
             "search",
+            searchQuery,
             search,
             verifiedAnswer
           );
@@ -1060,6 +1079,7 @@ export async function POST(request: Request) {
             });
             serverSearchContext = formatServerSearchContext(
               "deep",
+              searchQuery,
               search,
               verifiedAnswer
             );
